@@ -44,30 +44,59 @@ historyRoot = H(NOCT_HISTORY_ROOT_V1 || leafCount || ordered history leaves)
 
 ### `accountRoot`
 
-An account leaf commits every persisted economic or authorization field:
+An account leaf commits every persisted economic or authorization field. V1 is a **three-asset**
+protocol (`08:41-45`), so every map in `PrivateAccount` (`08:52-63`) contributes one committed field
+per asset, in canonical asset-ID order `[USDC=0, ETH=1, ZEN=2]`:
 
 ```text
 H(NOCT_ACCOUNT_LEAF_V1 ||
   accountAddress ||
-  cashUSDC || collateralUSDC || borrowedZEN || borrowedETH ||
-  scaledDebtZEN || scaledDebtETH ||
-  positionNonce || lastUpdateTimestamp ||
-  debtLockZEN || debtLockETH || collateralLockUSDC)
+  cashUSDC        || cashETH        || cashZEN ||
+  collateralUSDC  || collateralETH  || collateralZEN ||
+  borrowedUSDC    || borrowedETH    || borrowedZEN ||
+  scaledDebtUSDC  || scaledDebtETH  || scaledDebtZEN ||
+  positionNonce   || lastUpdateTimestamp ||
+  debtLockUSDC    || debtLockETH    || debtLockZEN ||
+  collateralLockUSDC || collateralLockETH || collateralLockZEN)
 ```
 
-Balances, collateral, lock quantities and both `scaledDebt` values are U256. A lock representation MUST commit its operation ID and locked U256 quantity; an absent lock has the canonical zero encoding. Derived current debt, LTV and health factor MUST NOT be stored as alternate economic fields.
+This is **21 committed fields**. The ordering is normative and MUST match the golden vectors exactly.
+
+An absent map entry is the canonical zero encoding, not an omitted field: the leaf is fixed-width and
+never variable-length in its per-asset section. Balances, collateral, lock quantities and all three
+`scaledDebt` values are U256. A lock representation MUST commit its operation ID and locked U256
+quantity; an absent lock has the canonical zero encoding. Derived current debt, LTV, threshold
+weighting and health factor MUST NOT be stored as alternate economic fields.
+
+**SPEC-03 / N-3 remediation.** The previous leaf committed `cashUSDC` and `collateralUSDC` only,
+`borrowedZEN/ETH` and `scaledDebtZEN/ETH` only, and `debtLockZEN/ETH` with `collateralLockUSDC` only —
+nine fields short of `PrivateAccount`. The consequence was that **all USDC debt was unreachable from
+`appRoot`**, so invariant 1 (`08:191`, `11:153`) was unverifiable for USDC and a proof could not
+distinguish a zero-USDC-debt account from a large one. It also left ETH and ZEN cash and collateral
+uncommitted, so a proof could not constrain `Ledger[ETH]` or `Ledger[ZEN]`.
 
 ### `reserveRoot`
 
-Each ZEN or ETH reserve leaf is:
+Each of the **three** reserve leaves (USDC, ETH and ZEN) is:
 
 ```text
 H(NOCT_RESERVE_LEAF_V1 ||
   assetID || availableLiquidity || totalScaledDebt ||
-  borrowIndexRay || lastAccrualTimestamp)
+  borrowIndexRay || lastAccrualTimestamp || writtenOffDebtUsd)
 ```
 
-`availableLiquidity`, `totalScaledDebt` and `borrowIndexRay` are U256. The root includes both supported assets in canonical asset-ID order.
+`availableLiquidity`, `totalScaledDebt`, `borrowIndexRay` and `writtenOffDebtUsd` are U256.
+`writtenOffDebtUsd` is the cumulative USD value of debt absorbed by `T13` for that reserve (File 12);
+it is an accounting quantity, not a token balance, and MUST NOT be summed into `Ledger`.
+
+The root includes **all three** supported reserves in canonical asset-ID order `[USDC, ETH, ZEN]`.
+
+**N-1 remediation.** The previous text read "Each **ZEN or ETH** reserve leaf" and "The root includes
+**both** supported assets", committing only asset IDs `{1,2}`. With `AssetID{USDC=0}` that left the
+entire USDC reserve — liquidity, total scaled debt, borrow index and accrual timestamp — unreachable
+from `reserveRoot` and therefore from `appRoot`, violating `09:141` and making every USDC invariant in
+`11:150-159` and `12:482-486` unprovable.
+
 
 ### `pendingOperationRoot`
 
@@ -75,7 +104,8 @@ Each repayment or liquidation operation leaf commits:
 
 ```text
 H(NOCT_PENDING_OPERATION_LEAF_V1 ||
-  operationID || kind || status || initiator || account || assetID ||
+  operationID || kind || status || initiator || account ||
+  debtAssetID || collateralAssetID ||
   paymentAmount || scaledDebtReduction || quoteBorrowIndexRay ||
   collateralToWithdraw || destination ||
   requestID || initiatorNonce || accountNonce ||
@@ -83,7 +113,26 @@ H(NOCT_PENDING_OPERATION_LEAF_V1 ||
   createdAt || expiresAt || capturedReceiptID)
 ```
 
-All payment, debt, index and collateral quantities are U256. `PREPARED`, `PAYMENT_CAPTURED`, `COMMITTED` and `EXPIRED` are distinct canonical status values. Committed and expired operations may be moved to history only in the same transition that updates both roots.
+All payment, debt, index and collateral quantities are U256. `PREPARED`, `PAYMENT_CAPTURED`,
+`COMMITTED` and `EXPIRED` are distinct canonical status values. Committed and expired operations may
+be moved to history only in the same transition that updates both roots.
+
+**SPEC-12 remediation.** `PendingOperation` carries **two** asset identifiers — `debtAsset` and
+`collateralAsset` (`08:126-127`) — because V1 supports cross-asset liquidation (`12:356-358`). This
+leaf previously committed a single `assetID`, so the committed operation could not distinguish "pay
+ETH debt, seize USDC collateral" from "pay USDC debt, seize ETH collateral". Both legs are now
+committed.
+
+Rules for the two identifiers:
+
+- For `kind = LIQUIDATION`, both are meaningful and MUST both be committed.
+- For `kind = REPAY`, there is no seizure, so `collateralAssetID` is **inapplicable** and MUST be the
+  canonical zero encoding. Per `09:180` a zero value is allowed only where the transition schema
+  declares a field inapplicable; this is that declaration. An implementation MUST NOT copy
+  `debtAssetID` into `collateralAssetID` for a repayment, because that would make a repay leaf
+  indistinguishable from a same-asset liquidation leaf.
+- `collateralToWithdraw` is likewise zero-encoded for `kind = REPAY`.
+
 
 ### `consumedReceiptRoot`
 
@@ -122,6 +171,7 @@ GlobalRootStateV1 {
     stateVersion              uint64
     velaApplicationID         int64
     chainID                   uint64
+    governanceIdentity        [20]byte
     accountRoot               [32]byte
     reserveRoot               [32]byte
     pendingOperationRoot      [32]byte
@@ -131,12 +181,26 @@ GlobalRootStateV1 {
     oracleCommitment          [32]byte
     latestOracleEpoch         uint64
     latestOracleTimestamp     uint64
+    protocolBadDebtUsd        U256
 }
 
 appRoot = H(NOCT_APP_ROOT_V1 || canonicalSerialize(GlobalRootStateV1))
 ```
 
+**This structure is the single source of truth for global state.** File 08's `GlobalState` is a
+derived view of it and is redefined there to be field-for-field consistent (SPEC-11). Where the two
+ever appear to differ, `GlobalRootStateV1` wins and File 08 is in error.
+
+`governanceIdentity` is the address authorized to invoke `T13 ABSORB_BAD_DEBT` (File 12). It is frozen
+in initial state at deployment and is committed here so that a proof constrains who may write off
+debt. It MUST NOT be mutable by any V1 transition; changing it requires a `protocolVersion` change.
+
+`protocolBadDebtUsd` is the cumulative USD value absorbed by `T13` across all reserves. It is an
+accounting quantity, not a token balance, and MUST NOT appear in `Ledger[a]`, the File 11 custody
+equation, or any withdrawal. It is committed so that absorbed loss cannot be concealed or double-counted.
+
 The application identity is the actual `applicationId int64` assigned by the Vela deployment and passed to `deploy`, `deposit` and `process_request`; it is not `keccak256("NoctFinance")`. `chainID` is the EIP-155 chain ID of the Vela contracts handling that deployment, not an assumed Ethereum-mainnet value. Deployment MUST freeze both values in initial state and every call MUST match them.
+
 
 All persisted economic fields MUST be reachable from exactly one of the five subroots and therefore from `appRoot`. Configuration and authenticated oracle values are committed by their own commitments; their hashes and monotonic epoch metadata are included in the global preimage.
 

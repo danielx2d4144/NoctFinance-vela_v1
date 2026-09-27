@@ -14,7 +14,7 @@ Future work starts from, and MUST preserve, the V1 baseline:
 - checked TinyGo-compatible U256 arithmetic with full-width `mulDiv`;
 - scaled account debt and equal reserve `totalScaledDebt`;
 - the frozen V1 utilization kink model;
-- Noct-funded ZEN/ETH reserves;
+- Noct-funded USDC, ETH and ZEN reserves;
 - Vela custody, authenticated inbound receipts and `ProcessResult.Withdrawals`;
 - receipt-before-debt-reduction repayment and liquidation;
 - max-LTV borrow/release gating and liquidation-threshold-only eligibility;
@@ -31,7 +31,7 @@ Add collateral assets only with explicit per-asset identifiers, WAD prices, risk
 
 ### User-funded liquidity
 
-Allow users to supply ZEN/ETH and earn yield. This requires supplier scaled balances/indexes, reserve-factor realization, withdrawal liquidity policy, privacy analysis and new custody invariants. It MUST be introduced under a new state/config version; V1 remains Noct-funded.
+Allow users to supply USDC, ETH or ZEN and earn yield. This requires supplier scaled balances/indexes, reserve-factor realization, withdrawal liquidity policy, privacy analysis and new custody invariants. It MUST be introduced under a new state/config version; V1 remains Noct-funded.
 
 ### Interest model evolution
 
@@ -67,7 +67,21 @@ Add recursion, aggregation or alternate proving systems only when supported by t
 
 ### Broader asset precision support
 
-Assets with native decimals other than 18 may be supported through explicit checked conversion at custody boundaries. Internal V1-style accounting remains WAD. Conversion policy MUST define dust ownership and both rounding directions; native units MUST never be confused with WAD values.
+V1 **already** ships a non-18-decimal asset: USDC has 6 native decimals. The conversion policy for the
+V1 asset set is therefore normative, not deferred, and is specified in File 08 ("Custody decimal
+boundary") with the frozen `nativeDecimals` values in File 10. This section previously deferred
+non-18-decimal support to the future while V1 shipped USDC, which is a contradiction; it is corrected
+here.
+
+What remains a future extension is support for assets **outside** the V1 decimal set
+`{6, 18, 18}` — in particular any asset with more than 18 native decimals, which is not representable
+in the WAD domain and cannot be added without a protocol version change.
+
+Any such extension MUST reuse File 08's `nativeToWad` / `wadToNative` / `quantizeDown` primitives
+rather than defining new ones, MUST keep all boundary-crossing amounts quantized to a whole native
+unit so that `wadToNative` remains exact, MUST define dust ownership explicitly, and MUST NOT confuse
+native units with WAD values.
+
 
 ## Upgrade principle
 

@@ -175,7 +175,10 @@ Risk-sensitive operations are blocked when:
 - confidence ratio exceeds policy;
 - publication age/future skew fails;
 - the deviation breaker trips;
-- the adapter snapshot exceeds on-chain `maxRiskDelaySeconds`;
+- the adapter snapshot exceeds on-chain `maxRiskDelaySeconds`, frozen at **120 seconds** and committed
+  in `configCommitment` (File 10, SPEC-08). `NoctTrigger` enforces it as
+  `block.timestamp - snapshot.adapterBlockTimestamp > maxRiskDelaySeconds`. Deployment MUST fail if the
+  value configured in the trigger differs from the committed value;
 - trigger domain/commitment validation fails;
 - the epoch is not strictly newer;
 - the coupled pending intent is absent, expired or already consumed.

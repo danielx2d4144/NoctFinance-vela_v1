@@ -9,10 +9,10 @@
 
 **Deliverables:**
 - [ ] Pin one Vela version/commit and its exact `ProcessResult.Withdrawals`, authenticated receipt, and TRUSTPROCESS integration APIs (see Files 11, 12, 17)
-- [ ] Pin Go: 1.24.x
-- [ ] Pin TinyGo: 0.39.0
-- [ ] Pin Node: 20.11.x LTS
-- [ ] Pin pnpm: 8.15.x
+- [x] Pin Go: 1.24.x — **DONE.** `noct-demo-wasm/go.mod:3` pins `go 1.24.0` and `build.sh` now asserts it (`GO_REQUIRED="1.24.0"`). This is not freely substitutable: TinyGo `0.39.0` rejects Go 1.26+ (`requires go version 1.19 through 1.25`), so `1.24.x` is the upper-compatible choice. Note the ambient toolchain on the verification machine is `go1.27.1`; the guest is built with a pinned Go 1.24.0 and `GOTOOLCHAIN=local`. See TOOLCHAIN-LOCK.md, "Scheduler resolution".
+- [x] Pin TinyGo: 0.39.0 — **DONE.** `build.sh:15` pins `TINYGO_REQUIRED="0.39.0"` and `build.sh:33` asserts it against `tinygo version`, failing the build on mismatch. Verified to build `main.go` with `-scheduler=none`. This pin and the Go pin above are a **pair**, not two independent numbers.
+- [ ] Pin Node: 20.11.x LTS — **CONTRADICTED, unresolved.** The verification machine runs Node **v22.20.0**, there is no `.nvmrc`, and neither `package.json` declares `engines`. Every Node-dependent artifact in Phase 0 was therefore produced under Node 22, not 20.11.x. Either re-verify under 20.11.x or move the baseline to 22.x; a recorded pin that does not match the version that produced the evidence is not a pin. See TOOLCHAIN-LOCK.md.
+- [ ] Pin pnpm: 8.15.x — **CONTRADICTED, unresolved.** Four sources disagree (this file: `8.15.x`; `README.md:47`: `9.x`; TOOLCHAIN-LOCK.md baseline: `9.x`; installed: `11.5.2`), and the repository contains `deploy-scripts/package-lock.json` (**npm**, resolved with `npm 10.9.3`) with **no** `pnpm-lock.yaml` anywhere. npm is currently the only package manager with reproducible evidence in this repository. Resolve the manager before pinning its version.
 - [ ] Pin TypeScript: 5.3.x
 - [ ] Pin ethers: 6.x
 - [ ] Pin Noir: 0.26.x
@@ -62,10 +62,15 @@
 - [ ] Implement `NoctStateV1` exactly as specified in File 08: global, reserve, oracle, configuration, commitment, private-account, pending-operation, and receipt state
 - [ ] Implement `PrivateAccount` with `cashUSDC`, `collateralUSDC`, `borrowedZEN`, `borrowedETH`, `scaledDebtZEN`, `scaledDebtETH`, `positionNonce`, and `lastUpdateTimestamp`; do not add principal or entry-index fields
 - [ ] Implement checked U256 financial types with canonical 32-byte big-endian encoding: WAD amounts/prices/ratios and RAY rates/indexes/scaled debt (see Files 08, 10, 11)
-- [ ] Integrate an audited TinyGo-compatible checked U256 library with full-width `mulDivDown` and `mulDivUp`; restrict `uint64` to non-financial counters and time metadata
+- [ ] Integrate an audited TinyGo-compatible checked U256 library with full-width `mulDivDown` and `mulDivUp`; restrict `uint64` to non-financial counters and time metadata — **AMENDED: partially met, and the "audited" requirement is NOT met.**
+  - **What exists.** `noct-demo-wasm/noctmath` is a **hand-written** checked U256 kernel, not an integrated audited library. It provides the full SPEC-10 required surface (`Add`, `Sub`, `Mul`, `Div`, `MulDivDown`, `MulDivUp`, `FromBytes32`, `ToBytes32`, `Cmp` as `(U256, ok bool)` free functions, in `spec10.go`) over a single implementation with a true 512-bit intermediate (`mul512`/`quoRem512` in `div.go`), so `mulDivDown`/`mulDivUp` are full-width as required.
+  - **Evidence of correctness.** 94.2% statement coverage; conformance vectors in `golden_test.go`; differential testing against `math/big` in `differential_test.go`; and the compiled WASI probe's output diffed line-for-line against the native Go golden (8/8 identical) under the pinned toolchain with `-scheduler=none`. `go vet` clean. *(Corrected 2026-09-27: this line previously read 94.6% and 24/24. Re-measured with the pinned Go 1.24.0 the coverage is 94.2%, and `cmd/schedprobe/expected.txt` contains 8 lines — no 24-line golden file exists. The old figures were unsupported. See `TOOLCHAIN-LOCK.md` "Evidence hygiene".)*
+  - **Why this is still OPEN.** Test coverage and differential testing are **not** an audit. A hand-rolled kernel has had no independent security review, no formal verification, and no external bug bounty history — precisely the assurance this line was written to require. The roadmap MUST NOT be marked complete on the strength of the test suite alone.
+  - **Conflict with SPEC-10.** `TOOLCHAIN-LOCK.md` SPEC-10 property 5 requires the kernel be "vendored into the repository with its license and a recorded SHA256, **or implemented in-repo with its own test suite**". `noctmath` satisfies the second branch, so SPEC-10 treats this kernel as conformant while this roadmap line does not. The two documents set different bars for the same component; that discrepancy is recorded in TOOLCHAIN-LOCK.md ("Conformance status") and MUST be resolved deliberately.
+  - **Required resolution.** Either (a) replace `noctmath` with a genuinely audited TinyGo-compatible U256 library, or (b) formally re-scope this line to "hand-written kernel" to match SPEC-10 property 5 and commission an independent audit of `noctmath` before mainnet. Whichever is chosen, the `uint64` restriction to non-financial counters and time metadata still applies and is separately testable.
 - [ ] Implement account creation, read, update (CRUD)
 - [ ] Implement complete replay state: monotonic position nonces plus append-only consumed receipt IDs, committed operation IDs, deterministic withdrawal IDs, and stored successful results (see Files 08, 12, 23)
-- [ ] Implement canonical `configCommitment`, `oracleCommitment`, `positionRoot`, and complete `stateCommitment` covering global/version, reserve, oracle, account-root, pending-operation, receipt, replay, and pending-outbound state, with `stateVersion` incrementing exactly once per committed transition
+- [ ] Implement canonical `configCommitment`, `oracleCommitment`, and the five File 09 subroots — `accountRoot`, `reserveRoot`, `pendingOperationRoot`, `consumedReceiptRoot`, `historyRoot` — combined into `appRoot = H(NOCT_APP_ROOT_V1 || canonicalSerialize(GlobalRootStateV1))`, covering global/version, reserve, oracle, account, pending-operation, receipt, replay, and pending-outbound state, with `stateVersion` incrementing exactly once per committed transition
 - [ ] Implement state serialization/deserialization with golden vectors
 - [ ] Integrate and test the pinned Vela Manager's encrypted versioned-state persistence and canonical on-chain root recovery; guest WASM MUST NOT implement a checkpoint or `SaveState` API
 
@@ -73,7 +78,7 @@
 ✅ 100 accounts can be created and updated
 ✅ Every financial field rejects non-canonical width, overflow/underflow, and native-integer or floating-point execution paths
 ✅ Golden vectors verify WAD/RAY encoding, full-width `mulDivDown`/`mulDivUp`, and required rounding directions
-✅ `configCommitment`, `oracleCommitment`, `positionRoot`, complete `stateCommitment`, and `stateVersion` update atomically where applicable
+✅ `configCommitment`, `oracleCommitment`, all five File 09 subroots, the derived `appRoot`, and `stateVersion` update atomically where applicable
 ✅ Nonces, receipt IDs, operation IDs, and withdrawal IDs prevent duplicate mutation or emission across 1000 replay attempts
 ✅ State serialization round-trip is lossless
 ✅ Restart selects the encrypted state version matching the canonical `ProcessorEndpoint` root and recovers byte-identical Noct state/commitments
@@ -135,7 +140,7 @@
 ✅ Borrow succeeds only when post-state debt is within `maxLTV`; liquidation threshold is not used as the borrow gate
 ✅ Borrow adds the same upward-rounded scaled delta to account and reserve, decreases liquidity, and credits a Vela-custodied private borrowed balance
 ✅ File 19 vectors pass for kink rates, one-second/year/chunked accrual, rounding, timestamp regression, chunk cap, and near-U256 limits
-✅ Invariants: `totalScaledDebt = Σ account.scaledDebt`, monotonic index, and custody conservation for ZEN and ETH
+✅ Invariants: `totalScaledDebt = Σ account.scaledDebt`, monotonic index, and custody conservation for USDC, ETH and ZEN
 ✅ Reserve exhaustion rejects only the new borrow without partial mutation
 ✅ Borrowed-asset withdrawal emits exactly one native Vela withdrawal and does not change debt or available liquidity
 

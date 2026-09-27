@@ -78,7 +78,7 @@ Only the owner of the liquidator destination authorization may capture payment. 
 
 ## CAPTURE: authenticated payment receipt
 
-Capture follows File 12 and is a distinct phase. The liquidator pays the exact prepared ZEN or ETH amount through the configured on-chain trigger/escrow/Vela deposit path, binding asset, amount, payer/destination authorization and `operationID`. Required finality is reached before Vela/trigger integration sends an authenticated capture payload to `trusted_request`.
+Capture follows File 12 and is a distinct phase. The liquidator pays the exact prepared debt-asset amount (USDC, ETH or ZEN) through the configured on-chain trigger/escrow/Vela deposit path, binding asset, amount, payer/destination authorization and `operationID`. Required finality is reached before Vela/trigger integration sends an authenticated capture payload to `trusted_request`.
 
 The capture handler MUST:
 

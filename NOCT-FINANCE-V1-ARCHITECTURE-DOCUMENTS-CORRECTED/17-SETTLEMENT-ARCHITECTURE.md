@@ -173,7 +173,7 @@ stateDiagram-v2
 
 `PREPARE_LIQUIDATION` privately verifies health, close factor, asset-specific prices, scaled-debt reduction, collateral seizure, and the current authenticated oracle epoch. It locks the exact debt slice and USDC collateral amount but changes no ownership.
 
-The liquidator then pays the exact prepared ZEN or ETH amount into the configured escrow. Without a finalized authenticated receipt, commit is impossible.
+The liquidator then pays the exact prepared debt-asset amount (USDC, ETH or ZEN) into the configured escrow. Without a finalized authenticated receipt, commit is impossible.
 
 `COMMIT_LIQUIDATION` consumes the receipt and atomically returns:
 

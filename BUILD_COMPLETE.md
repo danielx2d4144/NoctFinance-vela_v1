@@ -2,9 +2,24 @@
 
 ## 🎉 Success Summary
 
-Your simple NoctFinance lending protocol WASM job has been successfully built and is ready for deployment to the Vela environment!
+Your simple NoctFinance lending protocol WASM job builds and passes its verification gates.
 
-**Built WASM:** `noct-demo.wasm` (944 KB)
+> **Read this before deploying.** The artifact described below is a **verification build**, not a
+> release artifact. It was produced with the in-repo `wasm-opt` stub because real binaryen is not
+> installed on this machine. Under the mandated `-scheduler=none` there is no Asyncify transform to
+> apply, so the module is genuinely runnable — but `TOOLCHAIN-LOCK.md` requires a release artifact to
+> be optimised by real binaryen so the shipped bytes match what was measured. Rebuild with
+> `tools/build-guest.ps1 -Release` (which refuses to run without real binaryen) before deploying.
+>
+> The "944 KB" figure previously recorded here was stale: it described a 966,462-byte module built
+> without the mandated `-no-debug` / `-gc=conservative` flags, matching no configuration in
+> `TOOLCHAIN-LOCK.md`.
+
+**Built WASM:** `noct-demo.wasm` (309,580 bytes ≈ 302 KB)
+**SHA256:** `E91DA072B9314381A2E3F05E7532011B2DA1E995C2ECBAF552BD2CB51A2DF44C`
+**Build:** TinyGo `0.39.0` + Go `1.24.0`, `-target=wasi -no-debug -scheduler=none -gc=conservative`
+**Imports:** `total=6 asyncify=false` — no asyncify host functions
+**Provenance:** `noct-demo.wasm.provenance.txt`; gates in `artifacts/BUILD-EVIDENCE.md`
 **Location:** `/c/Users/Hi/Desktop/noctfinance-vela/noct-demo-wasm/`
 
 ---
@@ -23,7 +38,7 @@ A fully functional confidential lending protocol that implements:
 ### 2. **Complete Project Structure**
 ```
 noct-demo-wasm/
-├── noct-demo.wasm          ✅ Compiled WASM (ready to deploy!)
+├── noct-demo.wasm          ✅ Compiled WASM (verification build — see release note above)
 ├── main.go                 - Vela WASM exports
 ├── app/
 │   ├── state.go           - State management

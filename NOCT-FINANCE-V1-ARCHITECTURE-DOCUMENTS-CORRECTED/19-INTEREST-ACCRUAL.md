@@ -6,7 +6,7 @@
 
 ## V1 design
 
-V1 uses one lazy borrow index per ZEN and ETH reserve and the utilization kink model frozen in File 10. There is no fixed configured borrow rate and no account principal/entry-index accounting.
+V1 uses one lazy borrow index per reserve — for **all three** reserves, USDC, ETH and ZEN — and the utilization kink model frozen in File 10. There is no fixed configured borrow rate and no account principal/entry-index accounting.
 
 ```text
 Reserve {
@@ -14,8 +14,14 @@ Reserve {
     totalScaledDebt          ScaledDebt
     borrowIndex              IndexRay
     lastAccrualTimestamp     uint64
+    writtenOffDebtUsd        UsdWad
 }
 ```
+
+`writtenOffDebtUsd` is mutated only by `T13 ABSORB_BAD_DEBT` (File 12). Accrual MUST NOT change it;
+the accrual invariants below confirm that accrual touches only `borrowIndex` and
+`lastAccrualTimestamp`.
+
 
 At reserve creation:
 
@@ -155,7 +161,18 @@ No account-by-account block accrual occurs. Accrue an affected reserve at the st
 - collateral release and other position risk checks;
 - explicit reserve maintenance.
 
-For a risk check involving both ZEN and ETH debt, accrue both reserves to the same latest accepted `OracleState` timestamp before valuation. Repay and liquidation commit use the scaled reduction locked at preparation and do not re-quote it; other reserve activity may have advanced the index in the meantime.
+For a risk check involving debt in more than one asset, accrue **every** reserve with nonzero
+`totalScaledDebt` — USDC, ETH and ZEN alike — to the same latest accepted `OracleState` timestamp
+before valuation. Accruing only a subset would value the aggregate position against a mixture of
+stale and current indexes and is prohibited.
+
+Repay and liquidation commit do **not** replay the scaled reduction locked at preparation. Per File 12
+(SPEC-07) they re-derive it from the captured payment at the current index, subject to
+`maxQuoteIndexDriftRay`; a commit whose quote has drifted beyond that bound reverts, releases its
+locks and preserves the captured receipt unconsumed for re-quoting. The previous rule — "use the
+scaled reduction locked at preparation and do not re-quote it" — allowed a borrower to pay a stale,
+smaller amount for a reduction computed at a stale index.
+
 
 The transaction's target accrual timestamp is the timestamp in the latest accepted authenticated `OracleState`. A caller cannot provide an alternate timestamp or oracle signature. Equal timestamps are valid and produce no index change.
 

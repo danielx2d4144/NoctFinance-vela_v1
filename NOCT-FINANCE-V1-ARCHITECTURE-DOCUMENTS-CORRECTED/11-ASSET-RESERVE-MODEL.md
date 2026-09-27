@@ -1,18 +1,24 @@
-# 11. Asset & Reserve Model
+# 11. Asset & Reserve Model V1 (Multi-Collateral)
 
-**Status:** Implementation architecture baseline  
-**Audience:** Noct engineering team, junior developer, coding agent  
+**Status:** Implementation architecture baseline - MULTI-COLLATERAL  
+**Audience:** Noct Finance team (Alex, Daniel), Vela acceleration team, coding agent  
 **Normative terms:** MUST = mandatory; MUST NOT = prohibited; SHOULD = recommended; OPEN = unresolved and must not be invented.
 
-## V1 roles
+## V1 roles (Multi-Asset)
 
 | Asset | User deposit | User supply | Borrow | V1 role |
 |---|---:|---:|---:|---|
-| USDC | yes | collateral only | no | cash and collateral |
-| ZEN | repayment only | no | yes | Noct-funded borrow reserve |
-| ETH | repayment only | no | yes | Noct-funded borrow reserve |
+| USDC | yes | yes (collateral) | yes | Multi-purpose |
+| ETH | yes | yes (collateral) | yes | Multi-purpose |
+| ZEN | yes | yes (collateral) | yes | Multi-purpose |
 
-Noct-funded ZEN and ETH liquidity is frozen for V1. There is no user supplier principal, supplier index or supplier yield accounting.
+**V1 Design:** All three assets can be both collateral AND borrow assets. Users may:
+- Deposit USDC and supply as collateral to borrow ETH
+- Deposit ETH and supply as collateral to borrow USDC
+- Mix collateral (e.g., USDC + ETH collateral backing ZEN debt)
+- Mix debt (e.g., borrow both ETH and USDC against USDC collateral)
+
+Noct-funded USDC, ETH, and ZEN liquidity is frozen for V1. There is no user supplier principal, supplier index or supplier yield accounting.
 
 ## Numeric model
 
@@ -20,44 +26,60 @@ Every amount, price, rate, index and scaled-debt quantity is a checked U256 and 
 
 Financial Go code MUST use an audited TinyGo-compatible checked U256 and full-width `mulDivDown`/`mulDivUp`. It MUST NOT use native integer financial arithmetic, `math/big`, floating-point, or unchecked intermediate products.
 
-## Reserve state
+## Reserve state (Multi-Asset)
 
 ```text
 Reserve {
-    asset                    ZEN | ETH
+    asset                    AssetID (USDC | ETH | ZEN)
     availableLiquidity       AmountWad
     totalScaledDebt          ScaledDebt
     borrowIndex              IndexRay
     lastAccrualTimestamp     uint64
+    writtenOffDebtUsd        UsdWad
 }
 ```
 
-At genesis, `borrowIndex = RAY` and `totalScaledDebt = 0`. No separate `totalPrincipal`, `allocated`, or interest receivable counter exists.
+`writtenOffDebtUsd` is the cumulative USD value of debt absorbed from this reserve by
+`T13 ABSORB_BAD_DEBT` (File 12). It is an accounting quantity only: it is **excluded** from
+`Ledger[a]` and from the custody equation below, because it represents value the protocol no longer
+holds. It is monotonic non-decreasing and is committed in `reserveRoot` (File 09).
+
+
+V1 has three independent reserves:
+- `reserves[USDC]`
+- `reserves[ETH]`
+- `reserves[ZEN]`
+
+At genesis, for each reserve: `borrowIndex = RAY` and `totalScaledDebt = 0`. No separate `totalPrincipal`, `allocated`, or interest receivable counter exists.
 
 ```text
-currentTotalDebt = mulDivUp(totalScaledDebt, borrowIndex, RAY)
+currentTotalDebt[asset] = mulDivUp(totalScaledDebt[asset], borrowIndex[asset], RAY)
 ```
 
-The account and reserve updates for a borrow of `amount` are:
+The account and reserve updates for a borrow of `amount` in `asset`:
 
 ```text
-scaledDelta = mulDivUp(amount, RAY, borrowIndex)
-account.scaledDebt += scaledDelta
-reserve.totalScaledDebt += scaledDelta
-reserve.availableLiquidity -= amount
-account.borrowedBalance += amount
+scaledDelta = mulDivUp(amount, RAY, borrowIndex[asset])
+account.scaledDebt[asset] += scaledDelta
+reserve[asset].totalScaledDebt += scaledDelta
+reserve[asset].availableLiquidity -= amount
+account.borrowed[asset] += amount
 ```
 
-A borrow MUST fail on zero amount, arithmetic error, insufficient reserve liquidity, or a post-state max-LTV violation. Interest rounding may make derived debt slightly greater than the borrowed amount; this is intentional and conservative.
+A borrow MUST fail on zero amount, arithmetic error, insufficient reserve liquidity, an amount that is
+not a whole multiple of `quantum[asset]` (File 08), or a post-state violation of the **LTV gate**
+(`postLtvCollateralUsd < postWeightedDebtUsd`). The LTV gate uses `collateralFactorWad` and is
+strictly tighter than the liquidation gate, which uses `liquidationThresholdWad`; the two MUST NOT be
+conflated (File 12, SPEC-01). Interest rounding may make derived debt slightly greater than the borrowed amount; this is intentional and conservative.
 
-For repayment amount `amount` at the committed index:
+For repayment amount `amount` of `asset` at the committed index:
 
 ```text
-currentDebt = mulDivUp(account.scaledDebt, borrowIndex, RAY)
+currentDebt = mulDivUp(account.scaledDebt[asset], borrowIndex[asset], RAY)
 ```
 
-- Full repayment captures exactly the quoted full-debt amount and clears all account scaled debt.
-- Partial repayment requires `amount < currentDebt` and computes `scaledReduction = mulDivDown(amount, RAY, borrowIndex)`.
+- Full repayment captures exactly the quoted full-debt amount and clears all account scaled debt for that asset.
+- Partial repayment requires `amount < currentDebt` and computes `scaledReduction = mulDivDown(amount, RAY, borrowIndex[asset])`.
 - A partial repayment with `scaledReduction = 0` MUST be rejected.
 - Commit subtracts the same `scaledReduction` from the account and reserve and adds the captured token amount to available liquidity.
 
@@ -71,7 +93,7 @@ A `ProcessResult.Withdrawals` entry MUST bind at least the operation/withdrawal 
 
 ### V1 reserve funding
 
-1. The Noct funding authority transfers ZEN or ETH into the Vela custody endpoint.
+1. The Noct funding authority transfers USDC, ETH or ZEN into the Vela custody endpoint.
 2. The trusted integration observes finality and creates an authenticated reserve-funding receipt.
 3. Noct consumes that receipt exactly once and increases `availableLiquidity` by its amount.
 4. Duplicate delivery returns the prior result and cannot fund the reserve twice.
@@ -84,9 +106,9 @@ A borrow reallocates custody from `availableLiquidity` to the borrower's private
 
 A repayment or liquidation payment first enters Vela custody through the authenticated trigger/escrow path and receives a unique inbound receipt. Only idempotent `COMMIT_REPAY` or `COMMIT_LIQUIDATION` consumes the receipt, reduces scaled debt and increases reserve liquidity. Captured funds are never timeout-refunded by Noct; commit is retried to completion.
 
-## Conservation variables
+## Conservation variables (Multi-Asset)
 
-For asset `a`, define:
+For each asset `a` ∈ {USDC, ETH, ZEN}, define:
 
 - `Custody[a]`: actual finalized amount held for the Noct Vela application;
 - `PendingInbound[a]`: finalized custody receipts not yet consumed into ledger balances;
@@ -95,17 +117,25 @@ For asset `a`, define:
 
 ```text
 Ledger[USDC] =
-    Σ account.cashUSDC
-  + Σ account.collateralUSDC
-
-Ledger[ZEN] =
-    reserveZEN.availableLiquidity
-  + Σ account.borrowedZEN
+    Σ account.cash[USDC]
+  + Σ account.collateral[USDC]
+  + reserve[USDC].availableLiquidity
+  + Σ account.borrowed[USDC]
 
 Ledger[ETH] =
-    reserveETH.availableLiquidity
-  + Σ account.borrowedETH
+    Σ account.cash[ETH]
+  + Σ account.collateral[ETH]
+  + reserve[ETH].availableLiquidity
+  + Σ account.borrowed[ETH]
+
+Ledger[ZEN] =
+    Σ account.cash[ZEN]
+  + Σ account.collateral[ZEN]
+  + reserve[ZEN].availableLiquidity
+  + Σ account.borrowed[ZEN]
 ```
+
+**Multi-Asset Note:** Each asset has its own independent custody and ledger. A user with USDC cash + ETH collateral + ZEN debt contributes to all three asset ledgers.
 
 Locks only restrict spendability; they do not add a second beneficial balance and therefore do not appear again in `Ledger`.
 
@@ -114,6 +144,21 @@ At every reconciled point, including between emission and external execution:
 ```text
 Custody[a] = Ledger[a] + PendingInbound[a] + PendingOutbound[a]
 ```
+
+for each asset a ∈ {USDC, ETH, ZEN}.
+
+**Unit domain (SPEC-02).** All four terms are expressed in **WAD**, never in native token units. A
+custody balance observed on-chain in native units is brought into this equation only through
+`nativeToWad(balance, a)` as defined in File 08, which is exact and injective because
+`nativeDecimals[a] <= 18`. Conversely, a `PendingOutbound[a]` term is emitted as
+`wadToNative(amount, a)`, which is exact because every boundary-crossing amount is quantized at the
+point of computation. Mixing domains — comparing a 6-decimal USDC balance against an 18-decimal WAD
+ledger — would make this equation false by a factor of `10^12` and is the specific failure mode File
+08's quantization rule exists to prevent.
+
+`writtenOffDebtUsd` is **not** a term in this equation. Bad debt is value the protocol no longer
+holds; including it would falsely inflate `Ledger[a]` and mask a custody mismatch.
+
 
 Interpretation:
 
@@ -124,37 +169,38 @@ Interpretation:
 
 Reconciliation MUST halt affected transitions and alert on any mismatch. It MUST NOT invent a balancing entry.
 
-## Debt and liquidity invariants
+## Debt and liquidity invariants (Multi-Asset)
 
-For each borrow asset `a`:
+For each asset `a` ∈ {USDC, ETH, ZEN}:
 
 ```text
-reserve.totalScaledDebt[a] = Σ account.scaledDebt[a]
-reserve.availableLiquidity[a] <= Ledger[a]
+reserve[a].totalScaledDebt = Σ account.scaledDebt[a]
+reserve[a].availableLiquidity <= Ledger[a]
 currentTotalDebt[a] = mulDivUp(
-    reserve.totalScaledDebt[a],
-    reserve.borrowIndex[a],
+    reserve[a].totalScaledDebt,
+    reserve[a].borrowIndex,
     RAY)
 ```
 
-`availableLiquidity` is the amount currently lendable, not custody balance and not total assets. Current debt is a receivable and is not included in token custody. Accrued interest increases current debt through the index but does not increase available liquidity until tokens are actually captured and committed.
+`availableLiquidity[a]` is the amount currently lendable for asset `a`, not custody balance and not total assets. Current debt is a receivable and is not included in token custody. Accrued interest increases current debt through the index but does not increase available liquidity until tokens are actually captured and committed.
 
-Reserve liquidity MUST never underflow. A new borrow is rejected if `amount > availableLiquidity`. Reserve exhaustion affects only new borrows; deposits, repayments and permitted withdrawals continue according to their own checks.
+Reserve liquidity MUST never underflow for any asset. A new borrow of asset `a` is rejected if `amount > availableLiquidity[a]`. Reserve exhaustion affects only new borrows of that specific asset; deposits, repayments and permitted withdrawals of other assets continue according to their own checks.
 
 ## Rounding and reserve reconciliation
 
-Reserve aggregate debt is calculated once from aggregate scaled debt. It may differ by a few wei from the sum of individually rounded account debts. That expected rounding difference MUST NOT be booked as custody or liquidity.
+Reserve aggregate debt is calculated once from aggregate scaled debt per asset. It may differ by a few wei from the sum of individually rounded account debts. That expected rounding difference MUST NOT be booked as custody or liquidity.
 
-All scaled-debt mutations update the account and `totalScaledDebt` by exactly the same scaled quantity in one transition. Full repayment uses the account's entire scaled balance, which guarantees eventual clearing despite prior rounding. Partial reductions round down and must be nonzero.
+All scaled-debt mutations update the account and `totalScaledDebt[asset]` by exactly the same scaled quantity in one transition. Full repayment uses the account's entire scaled balance for that asset, which guarantees eventual clearing despite prior rounding. Partial reductions round down and must be nonzero.
 
-## Required monitoring
+## Required monitoring (Multi-Asset)
 
 Implementations SHOULD alert on:
 
-- custody conservation mismatch for any asset;
-- `totalScaledDebt` mismatch with account state;
-- reserve utilization above 80% and 95%;
+- custody conservation mismatch for any asset (USDC, ETH, or ZEN);
+- `totalScaledDebt[a]` mismatch with account state for any asset;
+- reserve utilization above 80% and 95% for any reserve;
 - captured inbound receipts awaiting commit;
 - emitted withdrawals awaiting Vela finality;
-- borrow-index or timestamp regression;
-- repeated arithmetic or accrual-bound failures.
+- borrow-index or timestamp regression in any reserve;
+- repeated arithmetic or accrual-bound failures;
+- cross-asset liquidation failures or starvation.
