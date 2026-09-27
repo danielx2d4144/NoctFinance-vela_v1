@@ -1,14 +1,73 @@
 import { ethers } from 'ethers';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
-// Configuration from deployed contracts
-const RPC_URL = 'http://localhost:8545';
-const PROCESSOR_ENDPOINT = '0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9';
+const here = dirname(fileURLToPath(import.meta.url));
+const wasmPath = join(here, '..', 'noct-demo-wasm', 'noct-demo.wasm');
 
-// Deployer account (has DEPLOYER_ROLE from .env.dev)
-const DEPLOYER_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+function fatal(...lines) {
+  for (const l of lines) console.error(l);
+  process.exit(1);
+}
 
-// Your WASM hash (from successful upload)
-const WASM_HASH = 'd0df4baedfc0ee1572d1d6910eae4ec4093e06a267ee9e642d54077eafdd8243';
+const RPC_URL = process.env.VELA_RPC_URL || 'http://localhost:8545';
+
+// Blocker B1: the ProcessorEndpoint address is not known. This file previously
+// hardcoded 0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9 -- the second address a
+// fresh Hardhat/Anvil chain assigns -- and described it as coming "from deployed
+// contracts". It did not. Supply it from a real deployer log or do not deploy.
+const PROCESSOR_ENDPOINT = process.env.VELA_PROCESSOR_ENDPOINT;
+if (!PROCESSOR_ENDPOINT || !/^0x[0-9a-fA-F]{40}$/.test(PROCESSOR_ENDPOINT)) {
+  fatal(
+    'FATAL: VELA_PROCESSOR_ENDPOINT is not set to a valid address.',
+    '  Blocker B1 is unresolved -- see VELA-DEV-TEAM-REQUEST.md.'
+  );
+}
+
+// A signing key must come from the environment, never from version control.
+const DEPLOYER_PRIVATE_KEY = process.env.VELA_DEPLOYER_PRIVATE_KEY;
+if (!DEPLOYER_PRIVATE_KEY) {
+  fatal(
+    'FATAL: VELA_DEPLOYER_PRIVATE_KEY is not set.',
+    '  A deployer key must not be committed to this repository.'
+  );
+}
+
+// Computed from the artifact actually being deployed. The literal this replaced
+// ('d0df4bae...', commented "from successful upload") matched no artifact here.
+let wasmBytes;
+try {
+  wasmBytes = readFileSync(wasmPath);
+} catch {
+  fatal(
+    `FATAL: ${wasmPath} not found. Build it first:`,
+    '  powershell -ExecutionPolicy Bypass -File tools/build-guest.ps1'
+  );
+}
+const WASM_HASH = createHash('sha256').update(wasmBytes).digest('hex');
+
+// Refuse to ship a verification build unless explicitly overridden.
+let provStatus = '';
+try {
+  const prov = readFileSync(wasmPath + '.provenance.txt', 'utf8');
+  provStatus = (prov.match(/^\s*status\s*:\s*(.+)$/m) || [, ''])[1].trim();
+} catch (e) {
+  if (e.code !== 'ENOENT') throw e;
+  fatal(
+    'FATAL: no provenance sidecar next to the artifact.',
+    '  Cannot confirm what this module was built with, so it must not ship.',
+    '  Re-run tools/build-guest.ps1, which writes the sidecar.'
+  );
+}
+if (/VERIFICATION-ONLY/i.test(provStatus)) {
+  console.error('FATAL: refusing to deploy a VERIFICATION-ONLY artifact.');
+  console.error(`  provenance status: ${provStatus}`);
+  console.error('  Rebuild with: tools/build-guest.ps1 -Release');
+  if (!process.argv.includes('--allow-verification-build')) process.exit(1);
+  console.error('  --allow-verification-build given: LOCAL TESTING ONLY.');
+}
 
 // Correct ProcessorEndpoint ABI based on docs
 const PROCESSOR_ABI = [

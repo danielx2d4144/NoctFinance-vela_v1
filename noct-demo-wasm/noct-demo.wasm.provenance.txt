@@ -9,7 +9,7 @@ tinygo        : 0.39.0
 go (GOROOT)   : 1.24.0 (C:\Users\Hi\Desktop\noctfinance-vela\tools\go124\go)
 wasm-opt      : stub-verification-only
 status        : VERIFICATION-ONLY (wasm-opt = stub-verification-only) -- NOT release-ready
-built (UTC)   : 2026-09-27T17:56:00.2459908Z
+built (UTC)   : 2026-09-27T18:49:49.0065363Z
 
 Identical to artifacts/guest_final.wasm, which passed the asyncify and WASI
 golden-output gates in the same run. See artifacts/BUILD-EVIDENCE.md.
