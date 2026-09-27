@@ -1,0 +1,7 @@
+LLVM triple:       wasm32-unknown-wasi
+GOOS:              wasip1
+GOARCH:            wasm
+build tags:        tinygo.wasm tinygo purego osusergo math_big_pure_go gc.precise scheduler.asyncify serial.none tinygo.unicore
+garbage collector: precise
+scheduler:         asyncify
+cached GOROOT:     C:\Users\Hi\AppData\Local\tinygo\goroot-04454061f8bedd7deb5ccb0aa537e03fb9070231074c43885c9997016476de71

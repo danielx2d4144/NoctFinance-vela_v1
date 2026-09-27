@@ -1,0 +1,41 @@
+node_modules/
+.env
+*.log
+.DS_Store
+.vscode/
+dist/
+build/
+*.wasm
+deploy-scripts/node_modules/
+
+# Pinned-toolchain installer archives (re-downloadable; ~235 MB). Kept out of the
+# evidence directory so artifacts/ contains only build evidence.
+tools/dist/
+
+# The pinned toolchains themselves (re-downloadable; ~1.3 GB combined).
+# tools/build-guest.ps1 asserts the exact TinyGo 0.39.0 + Go 1.24.0 pairing from
+# these trees at build time, and records the witness in artifacts/tg039_version.txt.
+tools/go124/
+tools/tg039/
+
+# Built from tools/wasmoptstub/ by tools/build-guest.ps1 when missing. This is the
+# VERIFICATION-ONLY stub, not real binaryen; committing it would let it be mistaken
+# for the real thing, which is how wasm-opt provenance got confused in the first place.
+tools/wasmoptstub.exe
+
+# Local scratch: coverage profile, ad-hoc TinyGo probes and editor-local settings.
+noct-demo-wasm/cov.out
+noct-demo-wasm/tgprobe/
+.claude/
+
+# Backup of the absorbed submodule's original git history (was a nested repo whose
+# origin is NoctFinance/Horizen-Acceleration-deliverable-, single commit 224e40c).
+# Kept so absorbing noct-demo-wasm into this repo is reversible. Not part of the build.
+.submodule-git-backup/
+
+# Exception to the *.wasm rule above: the deployable guest artifact IS committed,
+# because 31-DEPLOYMENT-ARCHITECTURE.md records sha256(noct-demo.wasm) as the
+# authoritative build hash and deploy.js / quickstart.sh / demo-transaction.sh
+# upload this exact path. Regenerate with tools/build-guest.ps1 and confirm the
+# hash still matches artifacts/BUILD-EVIDENCE.md -- a mismatch means drift.
+!noct-demo-wasm/noct-demo.wasm

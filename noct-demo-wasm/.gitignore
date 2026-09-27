@@ -1,0 +1,7 @@
+.claude/
+node_modules/
+
+# Local coverage profile and ad-hoc TinyGo scratch probes. The WASI probe whose
+# output is diffed against cmd/schedprobe/expected.txt lives in cmd/, not here.
+cov.out
+tgprobe/

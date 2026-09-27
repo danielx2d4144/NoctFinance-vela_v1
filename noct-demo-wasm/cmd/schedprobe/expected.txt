@@ -1,0 +1,8 @@
+add_ok=2000000000000000000 err=nil
+muldiv_wide=1606938044258990275541962092341162602522202993782792835301376
+mul_overflow=ERR:noctmath: u256 overflow
+sub_underflow=ERR:noctmath: u256 underflow
+div_by_zero=ERR:noctmath: division by zero
+quantize_down=1234567000000000000
+round_up=1234568000000000000
+DONE

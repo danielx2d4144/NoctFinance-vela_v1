@@ -1,0 +1,4 @@
+[submodule "noct-vela-demo"]
+	path = noct-vela-demo
+	url = https://github.com/HorizenOfficial/vela-starterkit.git
+	branch = main

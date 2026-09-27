@@ -1,0 +1,2 @@
+wasi_snapshot_preview1: 6 import(s) -> fd_write, proc_exit, clock_time_get, args_sizes_get, args_get, random_get
+total=6 asyncify=false

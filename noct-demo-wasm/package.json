@@ -1,0 +1,8 @@
+{
+  "name": "noct-demo-deploy",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "ethers": "^6.9.0"
+  }
+}

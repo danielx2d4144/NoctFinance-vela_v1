@@ -1,0 +1,1 @@
+package github.com/noctfinance/noct-demo-wasm: build constraints exclude all Go files in C:\Users\Hi\Desktop\noctfinance-vela\noct-demo-wasm

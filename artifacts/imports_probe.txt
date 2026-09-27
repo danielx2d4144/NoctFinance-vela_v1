@@ -1,0 +1,2 @@
+wasi_snapshot_preview1: 3 import(s) -> fd_write, proc_exit, random_get
+total=3 asyncify=false

@@ -1,0 +1,20 @@
+# Normalise line endings so a clone on any platform produces the same bytes.
+# This matters here for two concrete reasons:
+#   1. noct-demo-wasm/build.sh, quickstart.sh and demo-transaction.sh are executed
+#      by bash on Linux/CI. A CRLF checkout yields "#!/usr/bin/env bash\r" and dies
+#      with a bad-interpreter error, even though the same tree works on Windows.
+#   2. cmd/schedprobe/expected.txt is the golden output for the WASI runtime gate.
+#      tools/build-guest.ps1 normalises CRLF before diffing, so it tolerates either
+#      form -- but pinning LF removes the ambiguity rather than relying on that.
+* text=auto eol=lf
+
+*.sh text eol=lf
+
+# Never normalise binaries. Rewriting a byte of noct-demo.wasm would invalidate the
+# sha256 recorded in artifacts/BUILD-EVIDENCE.md and in 31-DEPLOYMENT-ARCHITECTURE.md.
+*.wasm binary
+*.exe binary
+*.zip binary
+*.pdf binary
+*.png binary
+*.jpg binary
