@@ -58,18 +58,34 @@ async function deploy() {
     }
     const wallet = new ethers.Wallet(deployerKey, provider);
 
-    // Blocker B1: the ProcessorEndpoint address is NOT known. The value previously
-    // hardcoded here (0x5FbDB2315678afecb367f032d93F642f64180aa3) is merely the
-    // first address a fresh Hardhat/Anvil chain assigns -- a guess dressed up by a
-    // "TODO: replace with your actual address" comment. Deploying against a guessed
-    // address is what 14-DAY-ROADMAP.md Day 13 explicitly forbids.
+    // Blocker B1 is RESOLVED (2026-09-28): the Base Sepolia ProcessorEndpoint is
+    // 0xd5E405a84753635608E7a28A59D7349BB2DAaEeF, verified three independent ways --
+    // Horizen's reply, eth_getCode on the live RPC (46,494 hex chars of bytecode) and
+    // the facilitator status page. It is recorded in .env.example. Still read from the
+    // environment, so this script cannot silently target the wrong chain or instance.
+    //
+    // The value previously hardcoded here (0x5FbDB2315678afecb367f032d93F642f64180aa3)
+    // was merely the first address a fresh Hardhat/Anvil chain assigns -- a guess
+    // dressed up by a "TODO: replace with your actual address" comment. Deploying
+    // against a guessed address is what 14-DAY-ROADMAP.md Day 13 explicitly forbids.
     const processorAddress = process.env.VELA_PROCESSOR_ENDPOINT;
     if (!processorAddress || !/^0x[0-9a-fA-F]{40}$/.test(processorAddress)) {
         console.error('FATAL: VELA_PROCESSOR_ENDPOINT is not set to a valid address.');
-        console.error('  Blocker B1 is unresolved -- see VELA-DEV-TEAM-REQUEST.md.');
+        console.error('  Blocker B1 IS resolved -- the verified value is in .env.example.');
         console.error('  Set it only from an address the Vela deployer actually reported.');
         process.exit(1);
     }
+
+    // Blocker B11 (CRITICAL, learned 2026-09-28): Vela deployment is PERMISSIONED.
+    // Horizen state that "only Horizen can deploy new apps", and the vela-nova wallet
+    // README names the mechanism -- the deploy sender must hold DEPLOYER_ROLE on the
+    // ProcessorEndpoint. The only app installed on either instance is vela-nova.
+    // This transaction will therefore revert on Base Sepolia until that role is granted
+    // to our address, or Horizen deploys the artifact for us. Warn loudly rather than
+    // letting it surface as an opaque revert.
+    console.error('NOTE: deployment is permissioned (blocker B11). Unless this wallet holds');
+    console.error('      DEPLOYER_ROLE on the ProcessorEndpoint, this call WILL revert.');
+    console.error('      See VELA-TESTNET-CONSTANTS.md section 5.');
 
     const abi = [
         "function submitDeployRequest(uint8 protocolVersion, bytes memory payload) public payable"
@@ -102,7 +118,19 @@ async function deploy() {
 
     const receipt = await tx.wait();
     console.log('✅ Deployed in block:', receipt.blockNumber);
-    console.log('Application ID: 1');
+    // This line previously printed a hardcoded "Application ID: 1". That was a guess.
+    // The ID is assigned by the chain at deploy time and MUST be read back, never
+    // assumed (File 31 assertion 5). We do not yet have a verified event ABI to parse it
+    // from, so dump the raw logs and require the operator to record the real value.
+    console.log('Deploy receipt logs (parse the assigned ApplicationID from these):');
+    for (const log of receipt.logs) {
+        const data = log.data.length > 66 ? log.data.slice(0, 66) + '...' : log.data;
+        console.log(`   ${log.address}  topic0=${log.topics[0]}  data=${data}`);
+    }
+    console.log('');
+    console.log('ACTION REQUIRED: record the real ApplicationID in the Day 13 completion');
+    console.log('record. Do NOT assume it, and do NOT reuse vela-nova');
+    console.log('11579806367557720661 -- that is somebody else\'s application.');
 }
 
 deploy().catch(console.error);

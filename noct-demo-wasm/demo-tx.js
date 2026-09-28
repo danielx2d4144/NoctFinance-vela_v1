@@ -1,100 +1,128 @@
 import { ethers } from 'ethers';
 
+// Nothing here is hardcoded any more. This file previously carried three values that
+// would each have failed silently or leaked: the well-known Anvil dev key
+// (0xac0974bec3...ff80, committed to a public repo), a guessed processorAddress
+// (0x5FbDB2315678afecb367f032d93F642f64180aa3 -- just the first address a fresh
+// Hardhat/Anvil chain assigns), and applicationId 1 (assumed; the real ID is assigned
+// at deploy time). Values now come from the environment (see .env.example) and fail
+// closed when absent.
+
+function requireEnv(name, hints) {
+    const v = process.env[name];
+    if (v === undefined || v.trim() === '') {
+        console.error(`FATAL: ${name} is not set.`);
+        for (const h of hints || []) console.error(`  ${h}`);
+        console.error('  Copy .env.example to .env, fill it in, then export it.');
+        process.exit(1);
+    }
+    return v.trim();
+}
+
+function requireAddress(name, hints) {
+    const v = requireEnv(name, hints);
+    if (!/^0x[0-9a-fA-F]{40}$/.test(v)) {
+        console.error(`FATAL: ${name} is not a valid 20-byte address: ${v}`);
+        process.exit(1);
+    }
+    return v;
+}
+
+function requireAppId() {
+    const raw = requireEnv('VELA_APPLICATION_ID', [
+        'BLOCKED by B11: Vela deployment is permissioned and we have no application yet.',
+        'Do NOT substitute vela-nova 11579806367557720661 -- that is a different app.',
+        'See VELA-TESTNET-CONSTANTS.md section 5.'
+    ]);
+    if (!/^\d+$/.test(raw)) {
+        console.error(`FATAL: VELA_APPLICATION_ID must be a decimal integer, got: ${raw}`);
+        process.exit(1);
+    }
+    return BigInt(raw);
+}
+
 async function runDemo() {
-    const provider = new ethers.JsonRpcProvider('http://localhost:8545');
-    const wallet = new ethers.Wallet(
-        '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
-        provider
-    );
+    const rpcUrl = (process.env.VELA_RPC_URL || '').trim() || 'http://localhost:8545';
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
 
-    // TODO: Replace this with your actual ProcessorEndpoint address from deployer logs
-    const processorAddress = '0x5FbDB2315678afecb367f032d93F642f64180aa3';
+    const privateKey = requireEnv('VELA_DEPLOYER_PRIVATE_KEY', [
+        'A signing key must never be committed to this repository.'
+    ]);
+    const wallet = new ethers.Wallet(privateKey, provider);
 
+    // B1 RESOLVED (2026-09-28): the Base Sepolia ProcessorEndpoint is
+    // 0xd5E405a84753635608E7a28A59D7349BB2DAaEeF -- verified via Horizen's reply,
+    // eth_getCode on the live RPC and the facilitator status page. Still read from the
+    // environment so this script cannot silently target the wrong chain.
+    const processorAddress = requireAddress('VELA_PROCESSOR_ENDPOINT', [
+        'Blocker B1 IS resolved -- the verified value is in .env.example.'
+    ]);
+    const appId = requireAppId();
+
+    // UNVERIFIED ABI. It disagrees with deploy-scripts/submit-transaction.js, which
+    // declares a 5-argument submitRequest -- at most one of them can be correct. Now that
+    // B1 gives us a real deployed contract, confirm the true signature against its
+    // bytecode before trusting any successful call. protocolVersion is contradictory for
+    // the same reason: sent as 1 here, but the facilitator spec on the status page says
+    // protocolVersion is currently 0. Resolve both before testnet use.
+    const PROTOCOL_VERSION = 1;
     const abi = [
         "function submitRequest(uint8 protocolVersion, uint64 applicationId, uint8 requestType, bytes memory payload, address tokenAddress, uint256 assetAmount, uint256 maxFeeValue) public payable"
     ];
-
     const processor = new ethers.Contract(processorAddress, abi, wallet);
 
     console.log('🏦 NoctFinance Demo - Running Transactions\n');
-    console.log('Wallet:', wallet.address);
-    console.log('ProcessorEndpoint:', processorAddress);
-    console.log('Application ID: 1\n');
+    console.log('RPC:               ', rpcUrl);
+    console.log('Wallet:            ', wallet.address);
+    console.log('ProcessorEndpoint: ', processorAddress);
+    console.log('Application ID:    ', appId.toString(), '\n');
 
-    // Transaction 1: Deposit 1000 USDC
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('💰 Transaction 1: DEPOSIT 1000 USDC');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    let payload = JSON.stringify({
-        operation: "DEPOSIT",
-        amount: "0x3b9aca00" // 1000000000 (1000 USDC with 6 decimals)
-    });
+    // LOCAL-DEMO SHORTCUT -- NOT valid against a real Vela instance. A real PROCESS
+    // request carries an ECIES-encrypted PayloadInstructions blob keyed to the enclave's
+    // P-521 public key (133 bytes, 0x04 || x || y), not plaintext JSON. Sending this to
+    // Base Sepolia would be rejected, or would leak the operation and amount and defeat
+    // the privacy model in Files 05 and 21. Kept only so the local Anvil demo still runs.
+    const rule = '━'.repeat(32);
+    async function submit(label, emoji, payloadObj, assetAmount, nativeValue) {
+        console.log(rule);
+        console.log(`${emoji} ${label}`);
+        console.log(rule);
+        const tx = await processor.submitRequest(
+            PROTOCOL_VERSION,
+            appId,
+            1, // PROCESS request type
+            ethers.toUtf8Bytes(JSON.stringify(payloadObj)),
+            ethers.ZeroAddress,
+            assetAmount,
+            ethers.parseEther('0.001'),
+            { value: nativeValue }
+        );
+        console.log('📤 Tx:', tx.hash);
+        await tx.wait();
+        console.log('✅ Confirmed!\n');
+        await new Promise(r => setTimeout(r, 3000));
+    }
 
-    let tx = await processor.submitRequest(
-        1, // protocol version
-        1, // app ID
-        1, // PROCESS request type
-        ethers.toUtf8Bytes(payload),
-        ethers.ZeroAddress,
-        1000000000n, // asset amount
-        ethers.parseEther('0.001'),
-        { value: ethers.parseEther('0.001') + 1000000000n }
-    );
+    // Deposit 1000 USDC (6 decimals -> 1000000000 base units)
+    await submit('Transaction 1: DEPOSIT 1000 USDC', '💰',
+        { operation: 'DEPOSIT', amount: '0x3b9aca00' },
+        1000000000n,
+        ethers.parseEther('0.001') + 1000000000n);
 
-    console.log('📤 Tx:', tx.hash);
-    await tx.wait();
-    console.log('✅ Confirmed!\n');
-
-    await new Promise(r => setTimeout(r, 3000));
-
-    // Transaction 2: Borrow 400 USDC
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('🏦 Transaction 2: BORROW 400 USDC');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    payload = JSON.stringify({
-        operation: "BORROW",
-        amount: "0x17d78400" // 400000000 (400 USDC)
-    });
-
-    tx = await processor.submitRequest(
-        1, 1, 1,
-        ethers.toUtf8Bytes(payload),
-        ethers.ZeroAddress,
+    // Borrow 400 USDC (400000000 base units)
+    await submit('Transaction 2: BORROW 400 USDC', '🏦',
+        { operation: 'BORROW', amount: '0x17d78400' },
         0n,
-        ethers.parseEther('0.001'),
-        { value: ethers.parseEther('0.001') }
-    );
+        ethers.parseEther('0.001'));
 
-    console.log('📤 Tx:', tx.hash);
-    await tx.wait();
-    console.log('✅ Confirmed!\n');
-
-    await new Promise(r => setTimeout(r, 3000));
-
-    // Transaction 3: View Balance
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('👁️  Transaction 3: VIEW BALANCE');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    payload = JSON.stringify({
-        operation: "VIEW_BALANCE"
-    });
-
-    tx = await processor.submitRequest(
-        1, 1, 1,
-        ethers.toUtf8Bytes(payload),
-        ethers.ZeroAddress,
+    await submit('Transaction 3: VIEW BALANCE', '👁️',
+        { operation: 'VIEW_BALANCE' },
         0n,
-        ethers.parseEther('0.001'),
-        { value: ethers.parseEther('0.001') }
-    );
+        ethers.parseEther('0.001'));
 
-    console.log('📤 Tx:', tx.hash);
-    await tx.wait();
-    console.log('✅ Confirmed!\n');
-
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(rule);
     console.log('✅ Demo Complete!');
-    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(rule);
     console.log('\nCheck Docker logs to see TEE execution:');
     console.log('  docker logs vela-skit-manager -f');
 }

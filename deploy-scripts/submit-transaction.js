@@ -1,16 +1,44 @@
 import { ethers } from 'ethers';
 
-// Configuration
-const RPC_URL = 'http://localhost:8545';
-const PROCESSOR_ENDPOINT = '0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9';
+// ── Configuration ─────────────────────────────────────────────────────────────
+// Nothing here is hardcoded any more. This file previously carried three fabricated
+// values, each of which would have failed silently or spent testnet gas against a
+// contract that is not ours:
+//   PROCESSOR_ENDPOINT 0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9 -- an Anvil mock,
+//                      not the real Base Sepolia ProcessorEndpoint
+//   USER_PRIVATE_KEY   0xac0974bec3...ff80 -- the well-known Anvil dev key, committed
+//                      to a public repository
+//   APP_ID             2397975349340933566n -- FABRICATED. It matches no Vela instance
+//                      on either chain and was formally retracted in the root commit.
+// Values now come from the environment (see .env.example) and fail closed when absent.
 
-// User account (default Anvil account #0)
-const USER_PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+function requireEnv(name, hints) {
+    const v = process.env[name];
+    if (v === undefined || v.trim() === '') {
+        console.error(`FATAL: ${name} is not set.`);
+        for (const h of hints || []) console.error(`  ${h}`);
+        console.error('  Copy .env.example to .env, fill it in, then export it.');
+        process.exit(1);
+    }
+    return v.trim();
+}
 
-// Your deployed application ID (as BigInt for large numbers)
-const APP_ID = 2397975349340933566n;
+function requireAddress(name, hints) {
+    const v = requireEnv(name, hints);
+    if (!/^0x[0-9a-fA-F]{40}$/.test(v)) {
+        console.error(`FATAL: ${name} is not a valid 20-byte address: ${v}`);
+        process.exit(1);
+    }
+    return v;
+}
 
-// ProcessorEndpoint ABI
+// ProcessorEndpoint ABI.
+// ⚠️ UNVERIFIED. This signature was written before the real address was known and has
+//    never been checked against the deployed contract. Now that B1 is resolved
+//    (0xd5E405a84753635608E7a28A59D7349BB2DAaEeF on Base Sepolia), confirm it against
+//    the actual bytecode/ABI before trusting a successful call. Note the sibling script
+//    noct-demo-wasm/demo-tx.js declares a DIFFERENT submitRequest signature -- at most
+//    one of them can be right.
 const PROCESSOR_ABI = [
   "function submitRequest(uint64 applicationId, uint8 requestType, bytes memory encryptedPayload, address tokenAddress, uint256 assetAmount) external payable returns (uint256)",
   "event ProcessRequest(uint256 indexed requestId, uint64 indexed applicationId, address indexed sender, uint8 requestType)"
@@ -36,12 +64,39 @@ async function main() {
 
   console.log(`🚀 NoctFinance Transaction: ${command.toUpperCase()}\n`);
 
-  // Setup provider and wallet
-  const provider = new ethers.JsonRpcProvider(RPC_URL);
-  const wallet = new ethers.Wallet(USER_PRIVATE_KEY, provider);
+  // Setup provider and wallet - everything from the environment, fail closed.
+  const rpcUrl = (process.env.VELA_RPC_URL || '').trim() || 'http://localhost:8545';
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
+
+  const privateKey = requireEnv('VELA_DEPLOYER_PRIVATE_KEY', [
+    'A signing key must never be committed to this repository.'
+  ]);
+  const wallet = new ethers.Wallet(privateKey, provider);
+
+  const processorAddress = requireAddress('VELA_PROCESSOR_ENDPOINT', [
+    'Blocker B1 is RESOLVED: the verified Base Sepolia value is in .env.example.'
+  ]);
+
+  // Blocker B11: we have no application of our own. Vela deployment is permissioned --
+  // only Horizen can deploy, and the deploy sender needs DEPLOYER_ROLE on the
+  // ProcessorEndpoint. Until that grant exists nothing here can submit a real request,
+  // so a missing ID is a hard stop rather than a defaulted one.
+  const appIdRaw = requireEnv('VELA_APPLICATION_ID', [
+    'BLOCKED by B11: deployment is permissioned and we have no application yet.',
+    'Do NOT substitute vela-nova 11579806367557720661 -- that is a different app.',
+    'See VELA-TESTNET-CONSTANTS.md section 5.'
+  ]);
+  if (!/^\d+$/.test(appIdRaw)) {
+    console.error(`FATAL: VELA_APPLICATION_ID must be a decimal integer, got: ${appIdRaw}`);
+    process.exit(1);
+  }
+  const appId = BigInt(appIdRaw);
+
+  console.log('   RPC:               ', rpcUrl);
+  console.log('   ProcessorEndpoint: ', processorAddress);
 
   console.log('📍 User address:', wallet.address);
-  console.log('📍 Application ID:', APP_ID);
+  console.log('📍 Application ID:', appId.toString());
   console.log('');
 
   // Create payload based on command
@@ -98,19 +153,23 @@ async function main() {
 
   console.log('');
 
-  // For simplicity, we're sending unencrypted payload
-  // In production, this would be encrypted with TEE's P-521 public key
+  // LOCAL-DEMO SHORTCUT -- NOT valid against a real Vela instance.
+  // A real PROCESS request carries an ECIES-encrypted PayloadInstructions blob keyed to
+  // the enclave's P-521 public key (133 bytes, 0x04 || x || y), not plaintext JSON.
+  // Sending this to Base Sepolia would be rejected, or would leak the operation and
+  // amount and defeat the privacy model in Files 05 and 21. Kept only so the local
+  // Anvil demo path still runs. Do not point this at testnet.
   const payloadBytes = ethers.toUtf8Bytes(JSON.stringify(payload));
 
   console.log('📦 Payload:', JSON.stringify(payload, null, 2));
   console.log('');
 
   // Submit request
-  const processor = new ethers.Contract(PROCESSOR_ENDPOINT, PROCESSOR_ABI, wallet);
+  const processor = new ethers.Contract(processorAddress, PROCESSOR_ABI, wallet);
 
   try {
     const tx = await processor.submitRequest(
-      APP_ID,
+      appId,
       requestType,
       payloadBytes,
       ethers.ZeroAddress, // Native token

@@ -1,10 +1,53 @@
 import { VelaClient } from '@horizenofficial/vela-common-ts';
 import { ethers } from 'ethers';
 
-// Configuration
-const RPC_URL = 'http://localhost:8545';
-const PROCESSOR_ENDPOINT = '0x...'; // From docker logs after deployment
-const APP_ID = 1; // Your deployed app ID
+// Configuration — from the environment, fail closed. See .env.example.
+// This file previously hardcoded PROCESSOR_ENDPOINT = '0x...' (not an address at all),
+// APP_ID = 1 (assumed), and inlined the well-known Anvil dev private key further down.
+// None of that could ever have worked against a real instance.
+//
+// NOTE: this file imports @horizenofficial/vela-common-ts, which is NOT in
+// noct-demo-wasm/package.json and has no node_modules here, so it does not currently
+// compile or run. It is kept as the intended client integration shape, not as working
+// code — do not cite it as evidence of a tested client path.
+function fatal(...lines: string[]): never {
+  for (const l of lines) console.error(l);
+  process.exit(1);
+}
+
+const RPC_URL = process.env.VELA_RPC_URL || 'http://localhost:8545';
+
+// Blocker B1 is RESOLVED: the verified Base Sepolia ProcessorEndpoint is
+// 0xd5E405a84753635608E7a28A59D7349BB2DAaEeF.
+const PROCESSOR_ENDPOINT = process.env.VELA_PROCESSOR_ENDPOINT;
+if (!PROCESSOR_ENDPOINT || !/^0x[0-9a-fA-F]{40}$/.test(PROCESSOR_ENDPOINT)) {
+  fatal(
+    'FATAL: VELA_PROCESSOR_ENDPOINT is not set to a valid address.',
+    '  Blocker B1 IS resolved -- the verified value is in .env.example.'
+  );
+}
+
+const DEPLOYER_PRIVATE_KEY = process.env.VELA_DEPLOYER_PRIVATE_KEY;
+if (!DEPLOYER_PRIVATE_KEY) {
+  fatal(
+    'FATAL: VELA_DEPLOYER_PRIVATE_KEY is not set.',
+    '  A signing key must not be committed to this repository.'
+  );
+}
+
+// Blocker B11: we have no application of our own — deployment is permissioned. The old
+// APP_ID = 1 was a guess. applicationId is a uint64, so it must be a BigInt: vela-nova's
+// real id (11579806367557720661) already exceeds Number.MAX_SAFE_INTEGER. Do NOT
+// substitute that one either — it is somebody else's application.
+const APP_ID_RAW = process.env.VELA_APPLICATION_ID;
+if (!APP_ID_RAW || !/^\d+$/.test(APP_ID_RAW)) {
+  fatal(
+    'FATAL: VELA_APPLICATION_ID is not set to a decimal integer.',
+    '  BLOCKED by B11: Vela deployment is permissioned and we have no application yet.',
+    '  See VELA-TESTNET-CONSTANTS.md sections 5 and 8.3.'
+  );
+}
+const APP_ID = BigInt(APP_ID_RAW);
 
 async function main() {
   const args = process.argv.slice(2);
@@ -12,7 +55,7 @@ async function main() {
 
   // Setup provider and wallet
   const provider = new ethers.JsonRpcProvider(RPC_URL);
-  const wallet = new ethers.Wallet('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', provider);
+  const wallet = new ethers.Wallet(DEPLOYER_PRIVATE_KEY, provider);
 
   console.log('Using address:', wallet.address);
 

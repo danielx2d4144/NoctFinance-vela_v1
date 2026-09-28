@@ -49,6 +49,18 @@ Confirmed on-chain or from official registries during pre-flight. Do not re-deri
 | Pyth ZEN/USD feed ID | `0xd183ffe0155e8a55e7274155a14ea2e8b54059cef471f88fa3f7eb4b5d8dbc24` | ✅ Exists in Pyth registry |
 | Go | `1.24.0` (`GOTOOLCHAIN=local`) | ✅ Pinned, asserted by `build.sh` |
 | TinyGo | `0.39.0` | ✅ Pinned, asserted by `build.sh:33` |
+| **Vela `ProcessorEndpoint`** (Base Sepolia) | `0xd5E405a84753635608E7a28A59D7349BB2DAaEeF` | ✅ Reply + `eth_getCode` (46,494 hex chars) + status page — three sources agree |
+| **Vela `TEEAuthenticator`** (Base Sepolia) | `0x69Ca935A17e3920B80DB71d723Aee918e1aE75E3` | ✅ Reply + `eth_getCode` (7,396 hex chars) |
+| **Vela RPC** (Base Sepolia) | `https://sepolia.base.org` | ✅ Live RPC answered `eth_chainId = 0x14a34` |
+| **Vela SubGraph** (Base Sepolia) | `https://api.goldsky.com/api/public/project_cml7x1bnbintv01xu7tih85gl/subgraphs/vela-base-sepolia/0.2.0/gn` | ✅ Reply + status page agree |
+| **Vela protocol version** | `0.2.0` | ✅ Facilitator, subgraph, `vela-nova` release and our pinned `vela-common-go` all agree |
+| **Gasless facilitator** (Base Sepolia) | wallet `0xd028cC273cC9A512ed074C7139d813f002e52D06`; `/submit` `/claim` `/verify` `/settle` `/supported` | ✅ Status page |
+| `vela-nova` app ID (Base Sepolia) | `11579806367557720661` | ✅ **Reference only — NOT ours.** Ours is assigned at deploy time, which is blocked by B11 |
+
+⚠️ **Event-name correction.** The Horizen reply says `OnChainRefound`; the real event is
+**`OnChainRefund`**. The reply also omits `OnChainWithdrawal` and `ClaimExecuted`. Bind
+against the five real names — see `VELA-TESTNET-CONSTANTS.md` §4. Code written from the
+reply's spelling would silently match nothing, which is the worst failure mode.
 
 The Go and TinyGo pins are a **pair**, not two independent numbers: TinyGo `0.39.0` rejects Go 1.26+, so `1.24.x` is the upper-compatible choice. Decimals above already satisfy File 31 assertion 1 (USDC=6, ZEN=18).
 
@@ -58,20 +70,26 @@ Hermes now requires a **Pyth API key** — provision it as a secret (File 31 sec
 
 ## ⛔ External blockers — Vela / Horizen dev team
 
-Days 5, 6, 13 and 14 **cannot complete** without these answers. The request is prepared in `VELA-DEV-TEAM-REQUEST.md` but has **not been sent** — this environment has no channel to the Vela/Horizen dev team, so a human must post it. Log each answer here with its source.
+Days 5, 6, 13 and 14 **cannot complete** without these answers. The request was prepared in `VELA-DEV-TEAM-REQUEST.md` and has now been **sent**; the Horizen team replied in three parts. **Part 1 received 2026-09-28 and recorded in `VELA-TESTNET-CONSTANTS.md`** — it resolved B1, B2, B8 and B9, partially advanced B4 and B6, and surfaced a new critical blocker B11 (`DEPLOYER_ROLE`). Parts 2 and 3 are still pending. Log each answer here with its source.
 
 | # | Blocker | Blocks | Answer | Source |
 |---|---|---|---|---|
-| B1 | `ProcessorEndpoint` address on Base Sepolia | 6, 13, 14 | ⬜ | — |
-| B2 | `TEEAuthenticator` address | 6, 13, 14 | ⬜ | — |
-| B3 | `TokenAllowlist` address | 6, 13, 14 | ⬜ | — |
-| B4 | `AuthorityRegistry` address | 6, 13, 14 | ⬜ | — |
-| B5 | Is testnet `resetOperator` non-zero? | 13, 14 | ⬜ | — |
-| B6 | Is USDC `0x036C…dCF7e` already allowlisted? | 6, 13 | ⬜ | — |
-| B7 | Pyth `IPyth` address on Base Sepolia (or the recommended oracle path) | 5, 13, 14 | ⬜ | — |
-| B8 | Real `novaw-linux` CLI | 1 | ⬜ | — |
-| B9 | Testnet access / deployment whitelisting | 13, 14 | ⬜ | — |
-| B10 | USDC/USD price source | 5 | ⬜ | — |
+| B1 | `ProcessorEndpoint` address on Base Sepolia | 6, 13, 14 | ✅ `0xd5E405a84753635608E7a28A59D7349BB2DAaEeF` — verified on-chain | Reply pt.1 + `eth_getCode` + status page |
+| B2 | `TEEAuthenticator` address | 6, 13, 14 | ✅ `0x69Ca935A17e3920B80DB71d723Aee918e1aE75E3` — verified on-chain | Reply pt.1 + `eth_getCode` |
+| B3 | `TokenAllowlist` address | 6, 13, 14 | ✅ `0x8774E760B45a60a15B75770Fd7c60338006beEfa` — **self-derived** from `ProcessorEndpoint.tokenAllowlist()`, 2,096 B of code | On-chain probe, §8.1 |
+| B4 | `AuthorityRegistry` address | 6, 13, 14 | ✅ `0x754a26f68E3E4Fab1BD05FB6B227bedEC2e732d3` — **self-derived** from `authorityRegistry()`, 1,124 B. A contract does exist; the reply's HTTP URL is a service in front of it | On-chain probe, §8.1 |
+| B5 | Is testnet `resetOperator` non-zero? | 13, 14 | ✅ **Premise was wrong.** No `resetOperator()` exists; `RESET_OPERATOR()` returns a *role hash* `0xc580ee…5917`, held by Horizen's deployer | On-chain probe, §8.2 |
+| B6 | Is USDC `0x036C…dCF7e` already allowlisted? | 6, 13 | ✅ **YES** — the subgraph's `TokenAllowed` holds exactly one token and it is our USDC (block 43,658,026). **tZEN is NOT allowlisted** → see B12 | Subgraph query, §8.1 |
+| B7 | Pyth `IPyth` address on Base Sepolia (or the recommended oracle path) | 5, 13, 14 | ⬜ Not in pt.1 — **still the largest technical risk** | — |
+| B8 | Real `novaw-linux` CLI | 1 | ✅ Real 14,034,960-byte asset at `vela-nova` release `v0.2.0`, SHA-256 `6ab01f2f…8941a2`; also buildable from public Go source | GitHub release API |
+| B9 | Testnet access / deployment whitelisting | 13, 14 | ✅ **PERMISSIONED** — "only Horizen can deploy new apps". Escalated to B11. ⚠️ The reply's "only `vela-nova` is installed" is **incomplete**: a second app `4474814306369175243` exists, deployed by the same sender (§8.4) | Reply pt.1 + subgraph |
+| B10 | USDC/USD price source | 5 | ⬜ Not in pt.1 | — |
+| **B11** | **`DEPLOYER_ROLE` on the Base Sepolia `ProcessorEndpoint`** — new, derived from pt.1 | **13, 14** | ⛔ **CRITICAL.** Role hash proven: `0xfc425f22…184c`. Horizen's deployer `0x2eaaf2…aacb8` holds it but is **not** `DEFAULT_ADMIN_ROLE`, so the grant must come from whoever holds the admin key | Reply pt.1 + on-chain probe, §8.3 |
+| **B12** | **tZEN is not on the `TokenAllowlist`** — new, found by probing | **6** | ⛔ The allowlist contains USDC only. Either Horizen allowlists tZEN `0x107f…24BB`, or Day 6 is re-scoped to USDC-only | Subgraph `TokenAllowed`, §8.8 |
+
+> Full detail, verification method, the event-name correction and the exact B11 ask live in
+> **`VELA-TESTNET-CONSTANTS.md`**. Parts 2 and 3 of the Horizen reply are still pending and
+> must be appended there — do not rewrite what is already recorded.
 
 **B7 note.** Horizen's documented oracle partner is **Stork**, which does not by itself confirm a Base Sepolia path. Prior candidate Pyth addresses were found stale or invalid. Until `IPyth` is confirmed, Day 5 can only be built against a local/mock adapter — which is legitimate work but is **not** evidence of a live oracle, and must not be recorded as such.
 
@@ -85,20 +103,20 @@ Update this table as days complete. **Days complete: 0 / 14.**
 
 | Day | Theme | File 34 phase | Status | Completed | Evidence |
 |---|---|---|---|---|---|
-| 1 | Toolchain truth reset | Phase 0 | 🟡 | partial | `tools/build-guest.ps1`, `artifacts/BUILD-EVIDENCE.md` |
+| 1 | Toolchain truth reset | Phase 0 | 🟡 | partial | `tools/build-guest.ps1`, `artifacts/BUILD-EVIDENCE.md`, `VELA-TESTNET-CONSTANTS.md` |
 | 2 | Monorepo + local Vela stack | Phase 0 / 1 | ⬜ | — | — |
 | 3 | `NoctStateV1` + `noctmath` promotion | Phase 2 | ⬜ | — | — |
 | 4 | State commitment & File 09 subroots | Phase 2 | ⬜ | — | — |
 | 5 | Oracle adapter (Pyth / File 18) | Phase 3 dep. | ⛔ B7, B10 | — | — |
-| 6 | Custody ingress + deposit path | Phase 3 | ⛔ B1–B4, B6 | — | — |
+| 6 | Custody ingress + deposit path | Phase 3 | 🟢 B12 only (B1–B4, B6 ✅) | — | — |
 | 7 | Borrow + interest accrual | Phase 3 / 4 | ⬜ | — | — |
 | 8 | Repay (two-phase T07/T08) | Phase 5 | ⬜ | — | — |
 | 9 | Liquidation + discovery (T09/T10) | Phase 6 | ⬜ | — | — |
 | 10 | Replay protection + failure recovery | Files 22, 23 | ⬜ | — | — |
 | 11 | Deployment assertions + hardening | File 31 | ⬜ | — | — |
 | 12 | SDK, indexer, dashboard | Phase 9 | ⬜ | — | — |
-| 13 | Base Sepolia deploy + E2E | Phase 9 / 11 | ⛔ B1–B9 | — | — |
-| 14 | Testnet launch + go/no-go | Phase 11 | ⛔ B1–B9 | — | — |
+| 13 | Base Sepolia deploy + E2E | Phase 9 / 11 | ⛔ **B11**, B3–B7, B10 | — | — |
+| 14 | Testnet launch + go/no-go | Phase 11 | ⛔ **B11** + Day 13 | — | — |
 
 ⛔ means the day has an unresolved external dependency. Work can often proceed against mocks, but the day **cannot be marked Done** until the blocker is answered — a green test against a mock is not a green test against Base Sepolia.
 
@@ -107,7 +125,7 @@ Update this table as days complete. **Days complete: 0 / 14.**
 # Day-by-day plan
 
 ## Day 1 — Toolchain truth reset
-**File 34 phase:** 0 · **Status:** 🟡 In progress — toolchain/guest subset **complete and evidenced**; external blocker B8 and the environment pins remain open
+**File 34 phase:** 0 · **Status:** 🟡 In progress — toolchain/guest subset **complete and evidenced**; blocker B8 is now **answered** (download + hash-verify still outstanding) and the environment pins remain open
 
 **Why this is first:** every later day builds on the guest artifact and on `TOOLCHAIN-LOCK.md` as its evidence record. Building Days 2–14 on top of placeholder WASM and a lock file containing a false verified-artifact claim would poison all downstream evidence. Fixing the truth is cheaper now than at Day 13.
 
@@ -124,7 +142,7 @@ The real defect was that **nothing enforced the toolchain pair on Windows**. `bu
 - [x] ~~Remove the two identical asyncify guest `.wasm` files from `artifacts/`~~ — **premise wrong.** They were identical `-scheduler=none` builds (`asyncify=false`), not asyncify. Removed as exact byte-duplicates of the canonical `guest_final.wasm` (SHA256 verified equal before deletion).
 - [x] ~~Remove or replace `wasmoptstub.exe` — it is **not** real `wasm-opt`~~ — **partly wrong.** It is legitimately valid for `-scheduler=none` verification, since there is no Asyncify transform to apply. The real defects were that `tools/wasmoptstub.exe` had never been built, and that `tools/wasmoptstub` sits on the persistent PATH so a `wasm-opt.exe` placed there masquerades machine-wide as binaryen. Stub built; the shadowing copy removed; provenance now determined by asking the binary, not by its name.
 - [x] ~~Correct the false verified-artifact claim in `TOOLCHAIN-LOCK.md`~~ — **premise wrong.** The `total=6 asyncify=false` claim was correct and is now independently reproduced. Three *other* values were false and are corrected: probe `123,840` → **16,625** bytes (it had been built without the mandated flags), golden `24/24` → **8/8** lines (`expected.txt` has 8 lines; no 24-line golden exists), coverage `94.6%` → **94.2%**.
-- [ ] Obtain the real `novaw-linux` CLI (blocker B8) and verify it is not the 9-byte `Not Found` placeholder — SPEC-14 / File 31 assertion 9
+- [ ] Obtain the real `novaw-linux` CLI (blocker B8) and verify it is not the 9-byte `Not Found` placeholder — SPEC-14 / File 31 assertion 9. **B8 ANSWERED 2026-09-28:** the real asset is `novaw-linux` from `HorizenOfficial/vela-nova` release `v0.2.0` (commit `44f6093`) — 14,034,960 bytes, SHA-256 `6ab01f2f0a4e5556a6d9bdc432058b372bdfa19b57e404d27f45df60368941a2`, or buildable from the public Go source with our pinned Go `1.24.0`. The box stays **unchecked** until the local file is downloaded and hashes to that digest; a known digest is not a verified artifact. See `VELA-TESTNET-CONSTANTS.md` §3.
 - [x] ~~Strip `fmt`, `os` and `encoding/json` from the guest source; replace with WASM-safe equivalents~~ — **NOT REQUIRED; disproven.** Under the correctly paired pinned toolchain the guest links cleanly with `-scheduler=none` *including* `encoding/json`, `fmt` and the `utils.LogInfo` → `time.Sleep` path. That link failure was a property of Go 1.27.1, not of the guest code. Stripping the JSON codec would have destroyed the ABI for no benefit. Recorded so the work is not done later on the strength of the old diagnosis.
 - [x] Rebuild the guest with canonical binary encoding — `tools/build-guest.ps1`
 - [x] Prove the `asyncify=false` build succeeds — guest `total=6`, probe `total=3`, both `asyncify=false`
@@ -134,7 +152,7 @@ The real defect was that **nothing enforced the toolchain pair on Windows**. `bu
 - [ ] Resolve the **Node** pin contradiction: `20.11.x` documented vs `v22.20.0` installed, no `.nvmrc`, no `engines` field. Pick one and make the evidence match the pin.
 - [ ] Resolve the **package-manager** contradiction: pnpm `8.15.x` (File 34) vs `9.x` (README, TOOLCHAIN-LOCK) vs `11.5.2` installed — and only `deploy-scripts/package-lock.json` (npm) exists, with no `pnpm-lock.yaml` anywhere. npm is currently the only manager with reproducible evidence.
 - [ ] Install Foundry
-- [ ] Write the verified Base Sepolia constants (chain ID, USDC, tZEN, feed IDs) into config
+- [ ] Write the verified Base Sepolia constants (chain ID, USDC, tZEN, feed IDs, **plus the now-verified Vela `ProcessorEndpoint`, `TEEAuthenticator`, RPC and SubGraph URLs**) into config — see `VELA-TESTNET-CONSTANTS.md` §1. Do **not** copy the `vela-nova` `ApplicationID`; ours does not exist yet (B11).
 - [ ] Install **real binaryen `wasm-opt`** and re-run `tools/build-guest.ps1 -Release`. Until then no release artifact exists; the gate refuses to publish one.
 
 ### Exit gate
@@ -151,14 +169,14 @@ The real defect was that **nothing enforced the toolchain pair on Windows**. `bu
 | Deployable matches the verified build | ✅ PASS | `noct-demo.wasm` = 309,580 B = `guest_final.wasm` |
 | `TOOLCHAIN-LOCK.md` has no unsupported claim | ✅ PASS | 3 false values corrected; see "Evidence hygiene" |
 | Every recorded pin matches the evidence producer | ✅ PASS | TinyGo `0.39.0` + Go `1.24.0` asserted from TinyGo's own output |
-| `novaw-linux` is a genuine binary | ⛔ **BLOCKED B8** | still the 9-byte `Not Found` placeholder; external dependency |
+| `novaw-linux` is a genuine binary | 🟡 **UNBLOCKED, NOT DONE** | B8 answered: real 14,034,960 B asset with published SHA-256 (`VELA-TESTNET-CONSTANTS.md` §3). The local file is still the 9-byte placeholder until downloaded and hash-verified |
 | Node / package-manager pins resolved | ⬜ OPEN | not started |
 | Foundry installed | ⬜ OPEN | not started |
 | Base Sepolia constants in config | ⬜ OPEN | not started |
 | Release artifact built with real binaryen | ⬜ OPEN | binaryen absent; `-Release` gate refuses (verified exit 2) |
 
 **Day 1 is NOT complete.** The toolchain and guest-artifact truth reset is done and independently
-reproducible, but the exit gate is conjunctive and B8 plus the environment pins are unanswered.
+reproducible, but the exit gate is conjunctive. B8 is now **answered** — the real `novaw-linux` is a published `v0.2.0` release asset with a known SHA-256 — yet answering a blocker is not the same as executing it: the local file is still the 9-byte placeholder, and the Node / package-manager / Foundry pins are untouched.
 
 ### Completion record
 | Field | Value |
@@ -291,16 +309,16 @@ Golden vectors for all leaves and subroots match (File 31 requires this at **eve
 ---
 
 ## Day 6 — Custody ingress + deposit path
-**File 34 phase:** 3 · **Status:** ⛔ Blocked on B1–B4, B6
+**File 34 phase:** 3 · **Status:** 🟢 Substantially unblocked — B1, B2, B3, B4 and B6 are all now **verified addresses/facts**; blocked on **B12** (tZEN not allowlisted) and on B11 for anything touching deployment
 
 ### Deliverables
-- [ ] Integrate `ProcessorEndpoint` as the sole request entry point — no direct-enclave shortcut
-- [ ] Integrate `TEEAuthenticator`, `TokenAllowlist`, `AuthorityRegistry`
-- [ ] Confirm whether USDC `0x036C…dCF7e` is already allowlisted (B6); allowlist it if not
-- [ ] Implement custody ingress for USDC and tZEN
+- [ ] Integrate `ProcessorEndpoint` as the sole request entry point — no direct-enclave shortcut. **Address now known and verified:** `0xd5E405a84753635608E7a28A59D7349BB2DAaEeF` on Base Sepolia (B1 ✅). Entry points are `submitRequest()` / `submitRequestFor()` (the latter is what the gasless facilitator uses).
+- [ ] Integrate `TEEAuthenticator`, `TokenAllowlist`, `AuthorityRegistry`. **All three addresses are now known and verified:** `TEEAuthenticator` `0x69Ca935A17e3920B80DB71d723Aee918e1aE75E3` (B2 ✅), `TokenAllowlist` `0x8774E760B45a60a15B75770Fd7c60338006beEfa` (B3 ✅), `AuthorityRegistry` `0x754a26f68E3E4Fab1BD05FB6B227bedEC2e732d3` (B4 ✅ — a contract *does* exist; the `AuthorityServiceURL` in the reply is an HTTP service in front of it, not a substitute). ⚠️ Their **ABIs are unknown**: every guessed accessor reverted (§8.6), so read their state from the Goldsky subgraph rather than from contract getters.
+- [x] Confirm whether USDC `0x036C…dCF7e` is already allowlisted (B6) — **YES.** Verified from the subgraph's `TokenAllowed` entities: exactly one token is allowlisted and it is our USDC (block 43,658,026). No allowlisting action needed for USDC.
+- [ ] Implement custody ingress for USDC and tZEN. ⛔ **B12: tZEN is NOT allowlisted** — the `TokenAllowlist` holds USDC only, so a tZEN deposit fails until Horizen adds it. Build the USDC path first and gate tZEN behind B12; do not ship a two-asset ingress against a one-asset allowlist, and do not paper over it by silently dropping tZEN from the design without recording the decision.
 - [ ] Implement the request lifecycle per File 21 (submit → Manager/Executor → `stateUpdate`)
 - [ ] Implement T01 deposit transition against the File 12 state machine
-- [ ] Implement P-521 ECDH encryption/decryption in the guest
+- [ ] Implement P-521 ECDH encryption/decryption in the guest. **Assumption now externally confirmed:** the facilitator's `ASSOCIATEKEY` path takes a raw **133-byte P-521 public key** encoded `0x04 ‖ x ‖ y` (`VELA-TESTNET-CONSTANTS.md` §6.1). Match that encoding exactly — it is a third-party-pinned format, not our choice.
 - [ ] Return native `ProcessResult.Withdrawals` bindings deterministic withdrawal ID, asset, amount and destination
 - [ ] Implement authenticated delivery hooks for inbound receipts and oracle updates
 - [ ] Verify private state persists across enclave restart
@@ -313,7 +331,7 @@ Client sends an encrypted request → enclave decrypts, processes, returns an en
 |---|---|
 | Date completed | — |
 | Commit SHA | — |
-| Vela contract addresses | — |
+| Vela contract addresses | `ProcessorEndpoint` `0xd5E405a84753635608E7a28A59D7349BB2DAaEeF` ✅ · `TEEAuthenticator` `0x69Ca935A17e3920B80DB71d723Aee918e1aE75E3` ✅ · `TokenAllowlist` ⬜ B3 · `AuthorityRegistry` 🟡 B4 (HTTP URL only) |
 | Latency p50/p95/p99 | — |
 | Notes, slips, deviations | — |
 
@@ -491,22 +509,39 @@ A user can complete deposit → borrow → repay through the UI against the **lo
 ---
 
 ## Day 13 — Base Sepolia deployment + E2E
-**File 34 phase:** 9 / 11 · **Status:** ⛔ Blocked on B1–B9
+**File 34 phase:** 9 / 11 · **Status:** ⛔ Blocked on **B11 (critical)**, B3–B7, B10
 
-**Hard rule:** do not attempt this day until blockers B1–B9 are answered. A deployment against guessed addresses is not a deployment.
+**Hard rule:** do not attempt this day until the remaining blockers are answered. A deployment against guessed addresses is not a deployment. B1 and B2 are now verified, which removes the *address-guessing* failure mode — but it does not make this day reachable.
+
+> ⛔ **B11 is a hard external stop, and it is new.** Part 1 of the Horizen reply states that
+> deployment is **permissioned**: "only Horizen can deploy new apps", and the only app
+> installed on either instance is `vela-nova`. The `vela-nova` wallet README names the
+> mechanism — the deploy sender must hold **`DEPLOYER_ROLE`** on `ProcessorEndpoint`.
+>
+> Therefore **"Register the Vela application" below is not something we can do.** No amount
+> of local engineering closes this. The day must be re-scoped from *we deploy* to *we hand
+> over a hash-verified artifact plus a deploy request, and consume whatever `ApplicationID`
+> comes back*. Until that grant exists, every downstream item that depends on our own
+> `velaApplicationID` (assertion 5, genesis state, replay protection) is unreachable, and
+> the E2E cannot run. This supersedes the old B9 "is it permissionless?" question — the
+> answer is no.
+>
+> Note also that assertion 5 becomes *more* important under this model, not less: the ID will
+> arrive out-of-band from a third party, so it must be read back from the chain or from their
+> deploy receipt and cross-checked, never transcribed once and trusted.
 
 ### Deliverables
 - [ ] Confirm all blocker answers are recorded in the Blockers table with sources
 - [ ] Fund the deployer; verify `chainID = 84532` from the live RPC
 - [ ] Deploy `OracleAdapter` and `NoctTrigger` to Base Sepolia
-- [ ] Register the Vela application; read the **actual** `velaApplicationID` — never assume it
+- [ ] Register the Vela application; read the **actual** `velaApplicationID` — never assume it. ⛔ **B11: we cannot self-register.** Either Horizen grants `DEPLOYER_ROLE` on `0xd5E405a84753635608E7a28A59D7349BB2DAaEeF` to an address we control, or they deploy for us and return the ID. Do **not** substitute `vela-nova`'s `11579806367557720661` — that is a different application.
 - [ ] Freeze `velaApplicationID` and `chainID` into initial state (assertion 5)
 - [ ] Verify USDC and tZEN against `TokenAllowlist`; confirm `decimals()` on-chain (assertion 1)
 - [ ] Run all 10 deployment assertions against the live deployment — fail closed
 - [ ] Set genesis reserve state (assertion 10)
 - [ ] Set `governanceIdentity` to a multisig; freeze it; confirm `T13` unreachable (assertion 6)
 - [ ] Confirm `resetOperator` status (B5) and record it
-- [ ] Deploy the guest WASM through the real `novaw-linux`; record WASM SHA256
+- [ ] Deploy the guest WASM through the real `novaw-linux`; record WASM SHA256. ⛔ Requires B11. Mechanics are now known: `novaw deployapp --wasm <path> --max-value-fee "100 wei"` uploads to `AuthorityServiceURL` `/deploy/upload` and submits `mode=artifact_ref` on-chain. Note the upload channel is **plaintext HTTP to a bare IP** — send the SHA-256 out-of-band so what they deployed can be checked against what we built.
 - [ ] Fund controlled test USDC / tZEN reserves
 - [ ] Run the full E2E on Base Sepolia: deposit → supply → borrow → accrue → repay → liquidate
 - [ ] Record every deployed address, tx hash and artifact hash in the Completion record
@@ -529,7 +564,7 @@ Full E2E green **on Base Sepolia** against real Pyth prices. All 10 assertions p
 ---
 
 ## Day 14 — Testnet launch + go/no-go
-**File 34 phase:** 11 · **Status:** ⛔ Blocked on B1–B9
+**File 34 phase:** 11 · **Status:** ⛔ Blocked on **B11 (critical)** — inherits every Day 13 dependency
 
 ### Deliverables
 - [ ] Re-run all deployment assertions against the final live contracts

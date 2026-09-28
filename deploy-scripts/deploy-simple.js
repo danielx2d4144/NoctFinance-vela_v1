@@ -14,12 +14,14 @@ function fatal(...lines) {
 
 const RPC_URL = process.env.VELA_RPC_URL || 'http://localhost:8545';
 
-// Blocker B1: not a discovered address. See the note in deploy-fixed.js.
+// Blocker B1 is RESOLVED (2026-09-28): the verified Base Sepolia ProcessorEndpoint is
+// 0xd5E405a84753635608E7a28A59D7349BB2DAaEeF, recorded in .env.example. Still required
+// from the environment so this script cannot silently target the wrong chain.
 const PROCESSOR_ENDPOINT = process.env.VELA_PROCESSOR_ENDPOINT;
 if (!PROCESSOR_ENDPOINT || !/^0x[0-9a-fA-F]{40}$/.test(PROCESSOR_ENDPOINT)) {
   fatal(
     'FATAL: VELA_PROCESSOR_ENDPOINT is not set to a valid address.',
-    '  Blocker B1 is unresolved -- see VELA-DEV-TEAM-REQUEST.md.'
+    '  Blocker B1 IS resolved -- the verified value is in .env.example.'
   );
 }
 
@@ -119,7 +121,13 @@ async function main() {
           console.log('  4. TEE loads and verifies the WASM');
           console.log('  5. Application ready for transactions!');
           console.log('');
-          console.log('Application ID will be:', requestId, '(derived from request ID)');
+          // UNVERIFIED ASSUMPTION, previously stated here as fact ("Application ID will be:
+          // <requestId>"). The subgraph types applicationId as a uint64 BigInt and requestId
+          // as Bytes, and nothing establishes that one derives from the other. Read the
+          // assigned id back instead (File 31 assertion 5) -- see check-app-state.js.
+          console.log('Deploy request ID:', requestId);
+          console.log('The assigned ApplicationID must be READ BACK from the subgraph, not');
+          console.log('derived from this request id -- that relationship is unproven.');
         }
       } catch (e) {
         // Not our event
@@ -133,13 +141,15 @@ async function main() {
     if (error.code === 'CALL_EXCEPTION') {
       console.error('');
       console.error('Possible reasons:');
-      console.error('  1. Deployer address lacks DEPLOYER_ROLE');
+      console.error('  1. Deployer address lacks DEPLOYER_ROLE -- this is EXPECTED, see B11');
       console.error('  2. Artifact not found in Authority Service');
       console.error('  3. Insufficient fee sent');
       console.error('  4. Contract expects specific descriptor format');
       console.error('');
       console.error('Your deployer address:', wallet.address);
-      console.error('Expected to have DEPLOYER_ROLE (check .env.dev)');
+      console.error(`  Verify with: node check-role.js ${wallet.address}`);
+      console.error('  .env.dev does not exist in this repo; DEPLOYER_ROLE is granted by');
+      console.error("  Horizen's admin, and their deployer does not hold that admin role.");
     }
 
     process.exit(1);
