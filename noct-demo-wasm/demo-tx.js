@@ -59,15 +59,19 @@ async function runDemo() {
     ]);
     const appId = requireAppId();
 
-    // UNVERIFIED ABI. It disagrees with deploy-scripts/submit-transaction.js, which
-    // declares a 5-argument submitRequest -- at most one of them can be correct. Now that
-    // B1 gives us a real deployed contract, confirm the true signature against its
-    // bytecode before trusting any successful call. protocolVersion is contradictory for
-    // the same reason: sent as 1 here, but the facilitator spec on the status page says
-    // protocolVersion is currently 0. Resolve both before testnet use.
-    const PROTOCOL_VERSION = 1;
+    // RESOLVED 2026-09-28. Both contradictions recorded here are now settled from the
+    // deployed contract rather than from docs:
+    //   * the 7-argument submitRequest below is the real one. inspect-selectors.js recovered
+    //     selector 2fbfa0d5 = submitRequest(uint8,uint64,uint8,bytes,address,uint256,uint256)
+    //     from the live bytecode; no selector for a 5-argument form exists. The sibling
+    //     script deploy-scripts/submit-transaction.js has been corrected to match.
+    //   * protocolVersion is 0, not 1. PROTOCOL_VERSION() is a public getter on the live
+    //     ProcessorEndpoint and returns 0 (see check-processor-state.js), matching
+    //     vela-common-ts/src/constants.ts. Sending 1 would have been rejected.
+    // The return type is bytes32 (the requestId), not uint256.
+    const PROTOCOL_VERSION = 0;
     const abi = [
-        "function submitRequest(uint8 protocolVersion, uint64 applicationId, uint8 requestType, bytes memory payload, address tokenAddress, uint256 assetAmount, uint256 maxFeeValue) public payable"
+        "function submitRequest(uint8 protocolVersion, uint64 applicationId, uint8 requestType, bytes calldata payload, address tokenAddress, uint256 assetAmount, uint256 maxFeeValue) external payable returns (bytes32)"
     ];
     const processor = new ethers.Contract(processorAddress, abi, wallet);
 

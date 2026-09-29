@@ -69,10 +69,15 @@ if (/VERIFICATION-ONLY/i.test(provStatus)) {
   console.error('  --allow-verification-build given: LOCAL TESTING ONLY.');
 }
 
-// Correct ProcessorEndpoint ABI based on docs
+// ProcessorEndpoint ABI -- VERIFIED 2026-09-28 against the deployed bytecode (selector
+// 4a0d0495 = submitDeployRequest(uint8,bytes), recovered by inspect-selectors.js). The
+// arguments were already right; the return type and the event were not. It returns the
+// requestId as bytes32, and the real event is DeployRequestSubmitted(uint64 indexed
+// applicationId, bytes32 requestId, address indexed sender). There is no DeployRequest
+// event, and protocolVersion does not appear in it.
 const PROCESSOR_ABI = [
-  "function submitDeployRequest(uint8 protocolVersion, bytes memory payload) external payable returns (uint256)",
-  "event DeployRequest(uint256 indexed requestId, address indexed sender, uint8 protocolVersion)"
+  "function submitDeployRequest(uint8 protocolVersion, bytes calldata payload) external payable returns (bytes32)",
+  "event DeployRequestSubmitted(uint64 indexed applicationId, bytes32 requestId, address indexed sender)"
 ];
 
 async function main() {
@@ -99,7 +104,7 @@ async function main() {
   };
 
   const payloadBytes = ethers.toUtf8Bytes(JSON.stringify(deployDescriptor));
-  const protocolVersion = 0; // Version 0 for Vela 0.2.0
+  const protocolVersion = 0; // VERIFIED 2026-09-28: PROTOCOL_VERSION() on the live contract returns 0
 
   console.log('📝 Deploy Descriptor:');
   console.log(JSON.stringify(deployDescriptor, null, 2));
@@ -128,10 +133,11 @@ async function main() {
     for (const log of receipt.logs) {
       try {
         const parsed = processor.interface.parseLog(log);
-        if (parsed.name === 'DeployRequest') {
-          requestId = parsed.args.requestId.toString();
+        if (parsed.name === 'DeployRequestSubmitted') {
+          requestId = parsed.args.requestId;
           console.log('🎉 Deploy Request ID:', requestId);
-          console.log('   Application ID will be:', requestId);
+          console.log('   Application ID (same event):', parsed.args.applicationId.toString());
+          console.log('   Confirm both with: node check-processor-state.js');
         }
       } catch (e) {
         // Not our event
@@ -144,7 +150,7 @@ async function main() {
       console.log('   docker logs vela-skit-manager -f');
       console.log('');
       console.log('You should see:');
-      console.log('  1. Manager picks up DeployRequest event');
+      console.log('  1. Manager picks up DeployRequestSubmitted event');
       console.log('  2. Fetches WASM from Authority Service');
       console.log('  3. Sends to Executor TEE');
       console.log('  4. TEE loads and verifies your WASM');

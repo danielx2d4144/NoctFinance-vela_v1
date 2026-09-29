@@ -45,12 +45,18 @@ console.error('NOTE: deployment is permissioned (blocker B11). Unless this walle
 console.error('      DEPLOYER_ROLE, submitDeployRequest WILL revert. Check with:');
 console.error('      node check-role.js <your-address>');
 
-// ProcessorEndpoint ABI - minimal for what we need
+// ProcessorEndpoint ABI -- VERIFIED 2026-09-28 against the deployed bytecode.
+// Every line that was here before was fabricated: there is no
+// submitDeployRequest(bytes32,bytes) overload (the real one is (uint8,bytes), selector
+// 4a0d0495), no 5-argument submitRequest (the real one takes 7, selector 2fbfa0d5), and
+// neither DeployRequest nor ProcessRequest exists as an event. Recovered with
+// inspect-selectors.js; matches IProcessorEndpoint.sol on main and pc/tee_upgrade.
+const PROTOCOL_VERSION = 0; // read live from PROTOCOL_VERSION() -- see check-processor-state.js
 const PROCESSOR_ABI = [
-  "function submitDeployRequest(bytes32 artifactId, bytes memory descriptor) external payable returns (uint256)",
-  "function submitRequest(uint64 applicationId, uint8 requestType, bytes memory encryptedPayload, address tokenAddress, uint256 assetAmount) external payable returns (uint256)",
-  "event DeployRequest(uint256 indexed requestId, address indexed sender, bytes32 artifactId)",
-  "event ProcessRequest(uint256 indexed requestId, uint64 indexed applicationId, address indexed sender)"
+  "function submitDeployRequest(uint8 protocolVersion, bytes calldata payload) external payable returns (bytes32)",
+  "function submitRequest(uint8 protocolVersion, uint64 applicationId, uint8 requestType, bytes calldata payload, address tokenAddress, uint256 assetAmount, uint256 maxFeeValue) external payable returns (bytes32)",
+  "event DeployRequestSubmitted(uint64 indexed applicationId, bytes32 requestId, address indexed sender)",
+  "event RequestSubmitted(uint64 indexed applicationId, bytes32 indexed requestId, address indexed sender, address facilitator)"
 ];
 
 async function main() {
@@ -114,8 +120,10 @@ async function main() {
   console.log('');
 
   try {
+    // The real function takes (protocolVersion, payload). artifactId travels INSIDE the JSON
+    // descriptor -- that is what `mode: artifact_ref` means -- it is not a separate argument.
     const deployTx = await processor.submitDeployRequest(
-      artifactId,
+      PROTOCOL_VERSION,
       descriptorBytes,
       { value: ethers.parseEther('0.01') }
     );
@@ -130,12 +138,13 @@ async function main() {
     for (const log of receipt.logs) {
       try {
         const parsed = processor.interface.parseLog(log);
-        if (parsed.name === 'DeployRequest') {
-          console.log('🎉 Deploy Request ID:', parsed.args.requestId.toString());
-          console.log('   Application ID will be derived from this request ID');
+        if (parsed.name === 'DeployRequestSubmitted') {
+          console.log('🎉 Deploy Request ID:', parsed.args.requestId);
+          console.log('   Application ID (same event):', parsed.args.applicationId.toString());
+          console.log('   Read both back with: node check-processor-state.js');
         }
       } catch (e) {
-        // Not a DeployRequest event
+        // Not a DeployRequestSubmitted event
       }
     }
 

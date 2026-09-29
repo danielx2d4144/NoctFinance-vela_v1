@@ -72,6 +72,45 @@ Details in [`TOOLCHAIN-LOCK.md`](NOCT-FINANCE-V1-ARCHITECTURE-DOCUMENTS-CORRECTE
 | `VELA-DEV-TEAM-REQUEST.md` | open questions for the Vela / Horizen dev team |
 | `noct-vela-demo/` | submodule: `HorizenOfficial/vela-starterkit` |
 
+## Run the local interactive prototype
+
+The repository now includes a browser client in [`local-app/`](local-app/). It runs without Docker
+or external services and implements the guest's core V1 flow locally: connect a MetaMask wallet or
+use the clearly labelled demo wallet, supply ETH collateral, borrow up to the 200% collateral limit,
+repay, withdraw while maintaining collateralization, and inspect the private position and activity
+history. State is persisted in the browser's local storage.
+
+```powershell
+cd local-app
+npm run check
+npm start
+```
+
+Open <http://127.0.0.1:4173>. If MetaMask is connected to a local Anvil chain (`31337`), successful
+actions also emit a zero-value self-transaction with an encoded local action receipt. The browser
+simulator remains usable without an RPC node; it does not claim to be a deployed Vela TEE. For the
+full WASM/TEE path, use the Docker and deployment instructions below.
+| `local-app/` | runnable browser prototype with EIP-1193 wallet connection, local simulator, and Vela validation bridge |
+
+## Local browser prototype
+
+Run the NoctFinance interface without external funds:
+
+```powershell
+cd local-app
+npm start
+```
+
+Open `http://127.0.0.1:4173`. Use **Demo wallet** for an immediate local walkthrough, or connect MetaMask/Rabby on the local Anvil network (chain ID `31337`). Deposit, borrow, repay, withdraw, collateral health, protocol totals, and transaction history are functional in the browser simulator.
+
+When the Docker Vela stack is running, validate the real WASM path with:
+
+```powershell
+node local-app/validate-vela.mjs --app-id <deployed-application-id>
+```
+
+This delegates to the existing encrypted `deploy-scripts/local-e2e-client.js` flow. See [`local-app/README.md`](local-app/README.md) for details.
+
 After cloning, run `git submodule update --init` to populate `noct-vela-demo/`.
 
 ## Blockers

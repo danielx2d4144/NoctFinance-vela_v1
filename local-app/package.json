@@ -1,0 +1,11 @@
+{
+  "name": "noctfinance-local-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node server.mjs",
+    "test": "node protocol.test.mjs",
+    "validate-vela": "node validate-vela.mjs"
+  }
+}

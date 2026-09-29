@@ -533,3 +533,409 @@ than a missing grant. Raise it alongside B11.
 
 
 
+
+---
+
+## 9. Part 2 of the reply — Accelerator Masterclass answers (recorded 2026-09-28)
+
+Part 2 arrived as answers to one Masterclass question plus fifteen from team metaMe. Every
+source it cites was fetched and checked, and the load-bearing claims were then re-tested
+against the live Base Sepolia contracts. **Most of the citations check out. Three of the
+answers do not describe what is actually deployed**, and two of those change our architecture.
+
+New tools added while verifying, all read-only (`eth_call` / `eth_getCode` only):
+
+| Script | Purpose |
+|---|---|
+| `deploy-scripts/check-tee-authenticator.js` | Who owns the TEE identity, what PCR0 is, which branch is deployed |
+| `deploy-scripts/inspect-selectors.js` | Recovers the real function surface from deployed bytecode |
+| `deploy-scripts/check-processor-state.js` | Live protocol constants, app state roots, custody, queue depth |
+
+### 9.1 Blocker scoreboard after part 2
+
+| # | Before part 2 | After part 2 | Why |
+|---|---|---|---|
+| **B5** | ✅ closed, premise wrong | ✅ **closed again, now with their own doc** | `PROCESSOR_ENDPOINT_ADMIN_RESET.md` confirms `RESET_OPERATOR` is a role, granted only at init, and deliberately *not* admin-grantable afterwards |
+| **B6** | ✅ USDC allowlisted | ✅ **confirmed from the contract** | `getAllowedTokens()` returns `[USDC]` — no longer resting on a subgraph query alone |
+| **B9** | ✅ permissioned; "state not readable on-chain" | ⚠️ **partly retracted** | `applicationStateRoots(uint64)`, `appCustody`, `totalAppCustody`, `pendingClaims`, `triggerContracts`, `getDeployedAppIds`, `PROTOCOL_VERSION` **all exist and work**. §8.2/§8.6 were wrong |
+| **B11** | ⛔ critical, needs admin grant | 🟡 **unblocked — a different path exists** | The intake form (§9.2). We do not need `DEPLOYER_ROLE` at all |
+| **B12** | ⛔ tZEN not allowlisted | ⛔ **confirmed, and the ask is now correctly targeted** | Only `DEFAULT_ADMIN_ROLE` can allowlist (§9.8). Their deployer does not hold it |
+| **B7 / B10** | ⬜ Pyth address + USDC/USD feed | ⬜ **untouched** | Part 2 never mentions oracles. Still the largest technical risk |
+| **B13 (new)** | — | ⛔ **CRITICAL** | The live `TeeAuthenticator` performs **no attestation verification at all** (§9.3) |
+| **B14 (new)** | — | ⛔ | Attestation can never bind to our app WASM; PCR0 is executor-only and instance-global (§9.5) |
+| **B15 (new)** | — | ⛔ | No upgrade path: new WASM ⇒ new app ID ⇒ **locked funds are not migrated** (§9.6) |
+| **B16 (new)** | — | 🟡 | Our guest withdraws ETH-only, so it cannot yet return a USDC deposit (§9.8) |
+| **B17 (new)** | — | ⛔ | `RESET_OPERATOR` can sweep **all** custody from **all** apps in one transaction (§9.13) |
+| **B18 (new)** | — | 🟡 | No execution or state-size guardrails; shared environment (§9.12) |
+
+### 9.2 B11 is unblocked — but not the way we were asking
+
+Part 1 left us asking for a `DEPLOYER_ROLE` grant. Part 2 answer 2 says deployment is
+*performed by the Vela Engineering team on request*, via a **Vela Production Testnet
+Deployment Intake** form: `https://tally.so/r/xXWL1v`.
+
+Fetched and confirmed: the form is titled exactly that and is **7 pages**. Page 1 asks for
+company/project name, project purpose, main use-cases, and *"How will a user interact with
+the deployed WASM?"* with the note *"all of these must be deployed independently by you."*
+
+The same answer also states:
+
+- the environment is **shared** with the other apps;
+- **no direct terminal access** to the environment is provided;
+- Base Sepolia now, **Horizen testnet "soon"**.
+
+**Consequence.** The B11 ask changes shape. We no longer need anyone to hand us a role — we
+need to submit the intake form and receive an `ApplicationID` back. That is strictly better:
+it removes a dependency on an unidentified admin key. Two things follow:
+
+1. Roadmap Day 13's deliverable "register the Vela application" becomes "submit intake, then
+   read the returned `ApplicationID` back from the chain" — assertion 5 gets *more* important,
+   because the ID still arrives out-of-band from a third party.
+2. Because there is no terminal access, **everything we planned to inspect inside the
+   environment is unobtainable.** Any design that assumed we could read executor logs, query
+   the manager, or inspect private state directly must be rebuilt on the subgraph plus
+   `AppEvent` (§9.9) plus our own client-side observation.
+
+Capacity is not the constraint: `availableDeploySlots()` returns **8**.
+
+### 9.3 ⚠️ B13 (CRITICAL) — the live `TeeAuthenticator` verifies no attestation at all
+
+Answer 3 says the attestation "is verified on-chain (see the contract code here
+`contracts/contracts/TeeAuthenticator.sol`) ... uses the NitroProver contract ... and checks
+the PCR0 measurement of the TEE". **That file was fetched and it does say this.** So does
+`main`'s `TeeAuthenticator.sol`:
+
+```solidity
+INitroProver public immutable nitroProver;
+bytes public pcr0;
+uint256 public immutable maxVerificationAge;
+function updateTee(bytes calldata attestation) external onlyOwner { ... }
+function updateTeeStep1(bytes calldata attestation) external onlyOwner { ... }
+function updatePcr0(bytes calldata newPcr0) external onlyOwner { ... }
+```
+
+**But that is not what is deployed at `0x69Ca935A17e3920B80DB71d723Aee918e1aE75E3`.**
+
+`eth_call` is authoritative for public state-variable getters, and five of them revert with no
+data on the live contract: `pcr0()`, `nitroProver()`, `maxVerificationAge()`,
+`currentUpdateStep()`, `getStep2TotalLength()`. `inspect-selectors.js` then recovered the
+complete dispatch table from the 3,697-byte runtime bytecode. There are **ten** selectors:
+
+```
+8da5cb5b  owner()                    715018a6  renounceOwnership()
+f2fde38b  transferOwnership(address)  43f855c3  teeSigner()
+fe4993ca  pubSecp521r1()             0dd7ce2f  getTeeSigner()
+081bec7e  getPubSecp521r1()          c91496c6  PK_LENGTH()
+c64af6fb  updateTee(address,bytes)   5c9626b9  (unidentified)
+```
+
+Note the shape of `updateTee`: **`(address, bytes)`**, not `(bytes attestation)`. It takes a
+signer address and a public key *directly*. There is no `updateTee(bytes)`, no
+`updateTeeStep1..4`, no `updatePcr0`, no `nitroProver`, no PCR comparison and no certificate
+chain anywhere in the bytecode.
+
+Alternative explanations were ruled out, not assumed away:
+
+| Hypothesis | Test | Result |
+|---|---|---|
+| It is a proxy hiding the real logic | EIP-1967 implementation + admin slots | both `0x00…00`; no minimal-proxy pattern; contract contains its own `SSTORE` |
+| My selector regex missed functions | direct `eth_call` on each getter | all five revert with no data — a public getter cannot revert if the storage exists |
+| It is an older build of the same design | `main` vs `pc/tee_upgrade` compared | `IProcessorEndpoint.sol` is **byte-identical** (19,631 B) on both, so the branches agree everywhere *except* `TeeAuthenticator` |
+| Basescan would show verified source | `getsourcecode` API | `status=0 NOTOK` — **unverified** |
+
+`PK_LENGTH()` returns **133** = `0x04 ‖ X(66) ‖ Y(66)`, an uncompressed P-521 point, and
+`pubSecp521r1()` holds a real 133-byte key, so the *data model* is genuine. What is missing is
+the *proof*.
+
+**What this means.** On Base Sepolia the TEE signing key is whatever the owner last set. The
+current values are `teeSigner = 0xC21F4E4ECD18aF70cD4FCd263F4dc196eb7D3625` and a 133-byte
+P-521 key. Nothing on-chain certifies that either corresponds to code running in a Nitro
+enclave. Every `stateUpdate` we accept is signed by a key that a single EOA can replace at
+will, with no attestation, no delay and no on-chain record of *why*.
+
+This does **not** mean Vela has no attestation — `main` clearly implements it, and
+`REPRODUCIBLE_EIF_BUILD.md` describes a rigorous reproducible-PCR0 process. It means **the
+shared testnet we have been told to build on does not have it turned on.** So:
+
+- Day 14's testnet launch demonstrates request/response plumbing and custody accounting.
+  It demonstrates **nothing** about the TEE trust model. The roadmap already says this about
+  ZK; it must now say it about attestation too.
+- The Masterclass answer to *"can we check the proof ourselves?"* — "Not possible ... must be
+  verified using our TeeAuthenticator" — is true of `main`, but on this instance there is
+  **no proof to check**, on-chain or off.
+- Any public claim that Noct runs in an attested Nitro enclave is **unsupportable on Base
+  Sepolia** and must be scoped to a future environment where `pcr0`/`nitroProver` are present.
+  Re-run `check-tee-authenticator.js` before making it.
+### 9.4 Q15 answered from the chain, not from the reply
+
+Answer 15 says the TEE upgrade procedure "is currently in the design phase ... any
+implementation has been started yet", pointing at `pc/tee_upgrade`'s
+`EXECUTOR_TEE_UPGRADE_DESIGN.md`. That branch and document **do exist** (verified; the
+directory also holds `APP_EVENT.md`, `BATCH_EXECUTION.md`,
+`ERC20_DEPOSITS_WITHDRAWALS_DESIGN.md`, `EXECUTOR_TEE_UPGRADE_TASKS.md`,
+`EXEC_MGR_HANDSHAKE.md`, `FACILITATOR.md`, `PROCESSOR_ENDPOINT_ADMIN_RESET.md`,
+`REPRODUCIBLE_EIF_BUILD.md`, `UPGRADABLE_CONTRACTS_DESIGN.md`). But the sub-questions have
+concrete answers today:
+
+| Q15 sub-question | Verified answer |
+|---|---|
+| Who controls `updatePCR0`? | On `main`: `TeeAuthenticator.owner()`. On Base Sepolia that function **does not exist** — `updateTee(address,bytes)` does instead, which is strictly more powerful |
+| Who is that owner? | `0x2eaaf231Ce583B7cd7Ae02c03B8Fe7a96F0aaCb8` — **Horizen's deployer**, the same EOA holding `DEPLOYER_ROLE` and `RESET_OPERATOR` |
+| Can ownership be a multisig? | Not enforced. `TeeAuthenticator` uses `Ownable`, not `AccessControl`. `getCode()` on the owner returns `0x` → a **plain EOA, one private key** |
+| Can upgrades be timelocked? | **No.** `updatePcr0` in `main` is immediate. The timelock lives in `proposePcr0Swap`, in the *unmerged* design doc |
+| Is historical PCR authorization retained? | No. `pcr0` is one overwritten `bytes` value; only the `PcrZeroUpdate(old,new)` event records history |
+| Can we bind our app/version to a PCR0? | **No** — see §9.5 |
+| Can a compromised measurement be revoked? | Yes, by the owner, instantly — which is also why a compromised owner key is unrecoverable without them |
+
+One address therefore controls TEE identity, app deployment **and** admin reset. It does
+**not** hold `ProcessorEndpoint`'s `DEFAULT_ADMIN_ROLE` (`hasRole` returns `false`), so there
+are at least three distinct privilege domains on this instance: the deployer EOA, an
+unidentified `DEFAULT_ADMIN_ROLE` holder, and the TEE signer itself.
+
+### 9.5 B14 — attestation can never bind to our application code
+
+Even taking `main`'s real `TeeAuthenticator` at face value, the check is:
+
+```solidity
+if (pcrs.length < 4 + pcr0.length) revert InvalidPCR();
+while (i != length) { if (pcrs[i + 4] != pcr0[i]) revert InvalidPCR(); ++i; }
+```
+
+Two structural facts follow, and both are confirmed by their own docs:
+
+1. **Only PCR0 is compared.** `REPRODUCIBLE_EIF_BUILD.md` states PCR0 is "a SHA-384 over the
+   **whole EIF**", assembled from the Go executor binary, the runtime image filesystem (the
+   ramdisk) and `nitro-cli`'s packaging blobs. It is a measurement of **the Vela executor**.
+2. **`pcr0` is one global value per instance**, not per application.
+
+Our WASM is uploaded afterwards, over the plaintext-HTTP authority service (§4.3). It is
+**not** in the EIF and therefore **not** in PCR0. Answer 3 half-says this — PCR0 refers "to a
+specific Vela version" — but the architectural consequence is not spelled out anywhere in the
+reply, and it is the one that matters to us:
+
+> **Vela's attestation certifies the runtime, never the application.** There is no
+> cryptographic binding between any Nitro attestation and the Noct guest binary. Our app's
+> integrity rests entirely on the upload channel and on operator honesty.
+
+Combined with §9.3 (nothing is attested on Base Sepolia at all) and answer 8's own caveat that
+"Vela attests execution, not correctness", the honest statement of our trust model is:
+
+| Claim | Supportable today? |
+|---|---|
+| "Noct's state transitions are produced inside an AWS Nitro enclave" | Only on an instance whose `TeeAuthenticator` exposes `pcr0`/`nitroProver` — **not** Base Sepolia |
+| "The enclave runs a *known, published* Vela executor build" | Yes in principle: PCR0 is independently recomputable (see below), *if* they publish the tag + expected PCRs |
+| "The enclave runs *our* audited WASM" | **No.** Never, by construction |
+| "Vela guarantees our computations are correct" | **No.** Their words: attests execution, not correctness |
+
+One genuinely useful thing came out of `REPRODUCIBLE_EIF_BUILD.md`: a third party **can**
+recompute PCR0 — `git checkout <tag> && ./dockerfiles/executor/build-eif.sh <tag> ./eif-out`,
+then compare `jq .Measurements.PCR0` against the on-chain value. It also warns that
+**the EIF file hash is not reproducible** (nitro-cli stamps a wall-clock `BuildTime` into the
+unmeasured header), so verification must gate on PCR0/1/2, never on an image hash. That
+directly amends our plan to "hash-verify" enclave artifacts: the technique is right for
+`novaw-linux` and `payment_app.wasm`, and wrong for any `.eif`.
+
+There are also two image variants — **genesis** (`EXPECT_EXISTING_KEYSET=false`) and
+**upgrade** — with *different PCR0s*. The genesis image bootstraps the keyset once and must
+then be retired from the accepted set and the KMS policy. So a single pinned PCR0 is not
+sufficient forever, and whoever controls the accepted set controls the enclave.
+
+### 9.6 B15 — there is no upgrade path, and locked funds do not follow
+
+Answer 4 is unambiguous and is the single most design-shaping statement in part 2:
+
+> "No upgrade procedure is yet available in this early stage. In case of a new wasm version you
+> will need to repeat the deployment procedure, and will obtain a fresh new application ID with
+> a fresh new state. **Any locked funds on the old application will have to be unlocked
+> manually and will not be migrated to the new application ID.**"
+
+For a lending protocol this is not an inconvenience, it is a solvency question. A Noct
+deployment holds user collateral in `appCustody[appId][token]`. Every WASM change therefore
+requires: stop new deposits → let every position be repaid or liquidated → drain custody →
+redeploy → re-onboard. Positions cannot be carried across, and the private state that tracks
+them is discarded.
+
+Concrete consequences for our architecture:
+
+1. **File 06/31's upgrade and migration assumptions are void.** Nothing in the sprint may
+   assume in-place WASM replacement. The `NoctTrigger` + `OracleAdapter` contracts we deploy
+   ourselves are upgradeable by us, but the Vela app is not — and `triggerContracts[appId]`
+   binds a trigger to one app ID, so a new app ID also needs re-registration via
+   `submitDeployRequestWithTrigger`.
+2. **Version churn is expensive, so the guest must be right the first time.** That raises the
+   value of the guest test suite and of `payment_app.wasm` as a reference, and lowers the value
+   of "ship and iterate".
+3. **Day 6 must design for a clean drain.** A USDC-only fallback (§9.8) is not merely easier;
+   it is the variant whose custody we can fully enumerate, because `getAllowedTokens()` tells
+   us exactly which tokens to sweep.
+4. **A kill switch is mandatory, not optional.** Since we cannot patch a live app, we need an
+   off-ramp that does not depend on the WASM being correct. Our own `NoctTrigger` and the
+   user-facing client are the only surfaces we control.
+5. Note the interaction with §9.13: the *operator* has a one-call way to drain everything
+   (`adminResetApps`). We have no equivalent for a single app. That asymmetry belongs in the
+   incident runbook.
+
+Answer 5 also resolves the multi-app contradiction answer 1 left open: **"multi-app with
+per-app isolated state and per-app locked funds is implemented"**, and the repositories are
+ground truth over the docs. Our own probe agrees — `getDeployedAppIds()` returns two IDs, and
+`appCustody` is keyed `[appId][token]`. Isolation is real at the contract level. Whether it is
+real inside the shared executor is a different question, and answer 11 says there are no
+resource guardrails (§9.12).
+### 9.7 Q9 — failure and replay semantics, now specified (and B9 partly retracted)
+
+Answer 9 gives a mechanism we can actually test against:
+
+- **Reorg handling.** An overall state root is recorded on-chain and re-checked every round
+  against the off-chain private state. On mismatch the private state is rolled back to a
+  version compatible with the on-chain root (it is kept in a versioned format) and execution
+  restarts from there.
+- **Idempotency.** Every request gets a unique id on entering the contract queue.
+
+The on-chain half of that is now visible. `IProcessorEndpoint.sol` exposes:
+
+```solidity
+function generateRequestId(address sender, uint64 applicationId, Structs.RequestType requestType,
+                           bytes32 payloadHash, address tokenAddress, uint256 assetAmount,
+                           uint256 idx) external pure returns (bytes32);
+function applicationStateRoots(uint64) external view returns (bytes32);
+function getNextPendingRequest() external view returns (Structs.PendingRequest memory, bytes32, bool);
+function isCurrentPendingRequest(bytes32) external view returns (bool);
+function getPendingRequestsSize() external view returns (uint256);
+```
+
+So `requestId` is **deterministic**, derived from sender, app, type, payload hash, token,
+amount and the queue index `idx`. Two useful consequences:
+
+- We can compute the expected `requestId` client-side *before* submitting — exactly the
+  idempotency handle Day 10's replay protection needs. An identical request at the same queue
+  index yields the same id.
+- **The canonical state is `applicationStateRoots(appId)`.** Monitoring can detect a manager
+  rollback by watching that value change without a corresponding `stateUpdate`. At probe time
+  it was `0xf94034604b7cf0e87d7d480c7bcbaa148b14cf680deafd983305da2abc6647d4` for `vela-nova`
+  and `0x967773e5fa67f01fa626051e33b4da256bcb8c8fee30a2aaef7f292b9870b2d5` for app
+  `4474814306369175243`.
+
+> **Retraction.** §8.2/§8.6 and blocker B9 recorded that application state "is NOT readable
+> from the ProcessorEndpoint contract". That was an artefact of trying invented accessor names
+> (`getApplicationState`, `applications`, `appStates`, `getApp`, ...). The real accessors exist
+> and work: `applicationStateRoots(uint64)` `7a36a891`, `appCustody(uint64,address)` `b7222ff5`,
+> `totalAppCustody(address)` `af20c960`, `pendingClaims(address,address)` `840059ec`,
+> `totalPendingClaims(address)` `194b6be8`, `claim(address,address)` `21c0b342`,
+> `triggerContracts(uint64)` `1cc76c38`, `getDeployedAppIds()` `7596ed43`,
+> `PROTOCOL_VERSION()` `aa3aa460`. `check-app-state.js`'s header is corrected and
+> `check-processor-state.js` reads the real surface.
+>
+> The subgraph is still the right source for *history* — who submitted what, when, and how it
+> completed — because the contract keeps only the current queue head. **Chain for current
+> state, subgraph for history.** The earlier "use the subgraph, not the getters" instruction is
+> too strong and is hereby narrowed.
+### 9.8 Q12 / B6 / B12 / B16 — ERC-20 reality, and a gap in our own guest
+
+Answer 12 says keep the kernel asset-agnostic, and lists `TokenAllowlist` plus the EIP-712 +
+EIP-2612 facilitator path. `ERC20_DEPOSITS_WITHDRAWALS_DESIGN.md` supplies the constraints
+that actually bind us:
+
+| Fact | Consequence for Noct |
+|---|---|
+| **Fees are ETH-only**, explicitly a non-goal for ERC-20 | A USDC depositor must still hold ETH for `maxFeeValue` *and* gas. "USDC-only onboarding" is impossible — it is USDC-asset / ETH-fee |
+| ETH: `msg.value == assetAmount + maxFeeValue`. ERC-20: `msg.value == maxFeeValue` exactly, asset via `transferFrom` | Our client must branch on `tokenAddress`. `submit-transaction.js` now documents this |
+| `assetAmount == 0` ⇒ `tokenAddress` must be `0x0` | Zero-value probes must use the zero address |
+| **Only `DEFAULT_ADMIN_ROLE` adds/removes allowlist tokens** | B12's ask must target the admin, not the deployer — and the deployer provably is not the admin (§9.4) |
+| Removal blocks new deposits but **not** claims or queued requests | A token can be delisted without stranding funds mid-flight; worth mirroring in our own risk parameters |
+| **No per-app on-chain allowlist** (R3): "Each WASM application manages its own supported-token configuration at runtime" | **This is the real answer to Q12's asset-agnostic ask.** Token policy is *ours*, enforced in the guest. Unsupported token ⇒ our WASM rejects ⇒ the failed-request path refunds |
+| Non-standard tokens are a non-goal: no fee-on-transfer, no rebasing | tZEN must be checked for both *before* we ask for it to be allowlisted |
+| Guest ABI is `deposit(appId, sender, tokenAddress, amount, state)` plus a `deploy(appId, params)` export | Our `DepositFunds(appId, sender, token, amount, stateJSON)` and `Deploy(appId, paramsJSON)` **already match** |
+
+**B16 — a gap in our own code, found while checking the above.** `vela-common-go v0.2.0` is
+our pin *and* the latest published tag (there is no v0.3.0), and it is fully token-aware:
+
+```go
+type Withdrawal struct {
+    TokenAddress       Address  `json:"tokenAddress"`
+    DestinationAddress Address  `json:"destinationAddress"`
+    Amount             *Uint256 `json:"amount"`
+}
+type AppEvent struct { EventSubType [32]byte `json:"eventSubType"`; Data []byte `json:"data"` }
+```
+
+So the dependency-version mismatch we feared **does not exist** — and `EventSubType` is already
+the corrected `[32]byte` form that `APP_EVENT.md` warns about (an earlier version returned
+`"0x"+hex` strings silently truncated to 32 ASCII characters, losing ~17 bytes of entropy).
+But `app/lending.go` hardcodes `TokenAddress: zeroAddress` in both the borrow and the withdraw
+instructions, and `ProcessWithdraw` takes no token parameter. **Our guest can accept a USDC
+deposit and can only ever return ETH.** For a USDC-funded app that is a custody accounting bug:
+the contract holds USDC while we instruct an ETH withdrawal. The `stateUpdate` solvency check
+should reject it, but relying on a revert to catch a design error is not a plan.
+`ProcessDeposit` and `ProcessRepay` already take a `token` argument, so the fix is to thread it
+through state and emit it on withdrawal — Day 6 work, not Day 13.
+
+One more observation: `vela-nova` holds **0.05 USDC** in `appCustody`, equal to the whole
+instance's `totalAppCustody(USDC)`. Their own task list says nova should "keep ETH-only
+behavior: reject non-zero `tokenAddress` in deposit". Either the deployed nova is not ETH-only
+or the USDC arrived another way. Either way the ERC-20 deposit path **has** been exercised on
+Base Sepolia — reassuring, though at 0.05 USDC not evidence it has been exercised *hard*.
+`totalPendingClaims(USDC)` is 0.1, twice the remaining custody, consistent with withdrawals
+moving value from `appCustody` into `pendingClaims`.
+### 9.9 Q14 correction — there *is* a plaintext event channel, and it is live
+
+Answer 14 says "The wasm logic can only emit withdrawals or events. However events can contain
+an arbitrary payload (**it will be encrypted with the receiver P521 key**)". That is only half
+true, and the missing half is the more useful one. `APP_EVENT.md` defines **two** event kinds:
+
+| | `UserEvent` | `AppEvent` |
+|---|---|---|
+| Directed at | one user (`userId`) | nobody — application-level |
+| Payload | `encryptedData`, encrypted to the receiver's P-521 key | **`data`, explicitly *not* encrypted by the executor** |
+| Subtype | `bytes32 indexed eventSubType` | `bytes32 indexed eventSubType` |
+| Emitted from | `ProcessRequest`, `DepositFunds` | `ProcessRequest`, `DepositFunds` |
+
+```solidity
+event AppEvent(uint64 indexed applicationId, bytes32 indexed requestId,
+               bytes32 indexed eventSubType, bytes data);
+```
+
+`eventSubType` is stored **as-is in log topics, unhashed**, so ASCII tags ≤32 bytes are directly
+readable; longer messages go in `data` with a hash in the topic. The subtype encoding is
+**per-application policy** — the framework deliberately provides no helper. `SimpleApp` and
+`TriggerApp` pack ASCII left-aligned via their own `subtype.FromString`; keccak256 or enumerated
+constants are equally valid; and `pkg/executor/subtype.go` derives *anti-linkability* subtypes
+from a user seed via HMAC-SHA256 (paired with `SUBTYPE_KEY_MESSAGE = "subtype-key-v1"` and
+`DEFAULT_SUBTYPE_N = 50` in `vela-common-ts`).
+
+**Verified live, not just documented.** Because this doc sits on `pc/tee_upgrade` it could have
+been unmerged, so it was checked two ways:
+
+- `stateUpdate` on the deployed `ProcessorEndpoint` is the 12-argument form taking
+  `(bytes[],bytes32[])` `EventData` tuples for **both** user and app events — selector
+  `8537c278`, present in the bytecode.
+- The live Goldsky subgraph's introspected schema includes an **`AppEvent`** entity, alongside
+  `UserEvent`, `ClaimExecuted`, `OnChainRefund`, `OnChainWithdrawal`, `TokenAllowed`,
+  `TokenRemoved`, `RequestSubmitted/Completed` and `DeployRequestSubmitted/Completed` — the 11
+  entities of §8.7.
+
+So `AppEvent` **is available to us on Base Sepolia today.** That is the real answer to Q14's
+"can we calibrate what metadata is emitted, and give us the schema": yes — emit `AppEvent` with
+a chosen `bytes32` subtype and whatever plaintext `data` we want, and it is publicly indexed.
+
+Three constraints to design around:
+
+1. `events.length == subTypes.length`, else `revert InvalidPayload()`.
+2. When `errorCode != NO_ERROR`, **both** event arrays must be empty — an error path cannot
+   carry a diagnostic event, so diagnostics must go in `errorMsg`.
+3. Ordering is by array index on-chain, and by `logIndex`/`sortKey` in the subgraph.
+
+**Direct consequence for us.** `app/operations.go` sets `AppEvents: []types.AppEvent{}` on
+*every* return path — we emit none. Since there is no terminal access (§9.2), `AppEvent` is our
+**only** public telemetry channel out of the enclave. Day 12's indexer/dashboard and Day 14's
+monitoring should be built on it: reserve a subtype namespace (e.g. `noct.liquidation`,
+`noct.oracle.update`, `noct.health`) and emit non-secret aggregates there, keeping anything
+secret in `UserEvent`. §8.7's entity list should accordingly be treated as our monitoring
+contract.
+<!-- SEC_9_10 -->
+
+
+
+
+
+
+

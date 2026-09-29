@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#080c16" />
+    <title>Noct Finance · Local protocol</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Noct Finance home">
+          <span class="brand-mark"><span></span></span>
+          <span>noct<span class="brand-muted">finance</span></span>
+        </a>
+        <div class="topbar-actions">
+          <button id="network-button" class="network-pill" type="button" title="Switch injected wallet to local Anvil"><i></i><span id="network-label">Local simulator</span></button>
+          <button id="wallet-button" class="wallet-button" type="button">Connect wallet</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero">
+          <div>
+            <p class="eyebrow"><span class="pulse"></span> PRIVATE LENDING · LOCAL DEVNET</p>
+            <h1>Put your collateral<br /><em>to work.</em></h1>
+            <p class="hero-copy">A local Noct protocol environment for supplying collateral, borrowing NOCT, and managing your position with transparent risk controls.</p>
+          </div>
+          <div class="hero-stat">
+            <span class="stat-label">PROTOCOL TVL</span>
+            <strong id="protocol-tvl">0.00</strong>
+            <span class="stat-unit">NOCT</span>
+            <span class="stat-note"><i></i><span id="protocol-borrows">0.00</span> borrowed</span>
+          </div>
+        </section>
+
+        <div id="notice" class="notice hidden" role="status"></div>
+        <div id="wallet-banner" class="wallet-banner">
+          <div class="wallet-banner-icon">⌁</div>
+          <div><strong>Connect a wallet to start</strong><span>Use MetaMask on Anvil, or launch the demo wallet for a no-funds local walkthrough.</span></div>
+          <button id="demo-button" class="button button-small" type="button">Use demo wallet</button>
+        </div>
+
+        <section class="dashboard-grid">
+          <article class="panel position-panel">
+            <div class="panel-heading">
+              <div><p class="eyebrow">YOUR POSITION</p><h2>Private account</h2></div>
+              <span id="position-health" class="health-badge neutral">No debt</span>
+            </div>
+            <div class="position-main">
+              <div class="position-value"><span>Collateral supplied</span><strong id="user-collateral">0.00</strong><small>NOCT</small></div>
+              <div class="position-value"><span>Outstanding debt</span><strong id="user-borrowed">0.00</strong><small>NOCT</small></div>
+            </div>
+            <div class="health-track"><div id="health-bar" style="width: 0%"></div></div>
+            <div class="position-meta"><span>Collateral ratio <b id="user-ratio">200%</b></span><span>Available to borrow <b id="user-available">0.00 NOCT</b></span></div>
+          </article>
+
+          <article class="panel action-panel">
+            <div class="panel-heading"><div><p class="eyebrow">PROTOCOL ACTION</p><h2 id="action-title">Supply collateral</h2></div><span class="action-icon">↗</span></div>
+            <div class="tabs" role="tablist" aria-label="Protocol actions">
+              <button class="tab active" data-action="DEPOSIT" type="button">Deposit</button>
+              <button class="tab" data-action="BORROW" type="button">Borrow</button>
+              <button class="tab" data-action="REPAY" type="button">Repay</button>
+              <button class="tab" data-action="WITHDRAW" type="button">Withdraw</button>
+            </div>
+            <form id="action-form">
+              <label for="amount">Amount</label>
+              <div class="amount-input"><input id="amount" inputmode="decimal" autocomplete="off" placeholder="0.00" /><span>NOCT</span><button id="max-button" type="button">MAX</button></div>
+              <div class="form-hint"><span id="action-hint">Supply collateral to unlock borrowing power.</span><span id="wallet-balance">Wallet —</span></div>
+              <button id="action-button" class="button primary" type="submit">Connect wallet to deposit <span>↗</span></button>
+            </form>
+          </article>
+        </section>
+
+        <section class="lower-grid">
+          <article class="panel overview-panel">
+            <div class="panel-heading"><div><p class="eyebrow">MARKET OVERVIEW</p><h2>NOCT market</h2></div><span class="live-label"><i></i> LIVE</span></div>
+            <div class="market-grid">
+              <div class="market-stat"><span>Total supplied</span><strong id="market-supplied">0.00</strong><small>NOCT</small></div>
+              <div class="market-stat"><span>Total borrowed</span><strong id="market-borrowed">0.00</strong><small>NOCT</small></div>
+              <div class="market-stat"><span>Utilization</span><strong id="market-utilization">0.00%</strong><small>of supplied liquidity</small></div>
+              <div class="market-stat"><span>Base collateral factor</span><strong>50.00%</strong><small>200% minimum ratio</small></div>
+            </div>
+            <div class="market-footnote"><span class="secure-dot">✦</span> Local state is persisted in this browser. Vela/TEE execution can be validated from the CLI.</div>
+          </article>
+
+          <article class="panel activity-panel">
+            <div class="panel-heading"><div><p class="eyebrow">ACTIVITY</p><h2>Recent transactions</h2></div><button id="clear-button" class="text-button" type="button">Clear</button></div>
+            <div id="activity-list" class="activity-list"><div class="empty-state"><span>◌</span><p>No activity yet</p><small>Your confirmed protocol actions will appear here.</small></div></div>
+          </article>
+        </section>
+
+        <section id="local-stack-card" class="stack-card">
+          <div class="stack-copy"><p class="eyebrow">OPTIONAL VELA CONNECTION</p><h2>Run the real local stack when available.</h2><p>The browser simulator uses the same 200% collateral rules as the guest. When Docker Vela is running, validate encrypted WASM execution from the repository CLI.</p></div>
+          <div class="stack-command"><span>npm run validate-vela -- --app-id &lt;id&gt;</span><button id="copy-command" type="button">Copy</button></div>
+        </section>
+      </main>
+
+      <footer><span>NOCT FINANCE · LOCAL PROTOTYPE</span><span>Vela guest v0.1.0 · Anvil chain 31337</span></footer>
+    </div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

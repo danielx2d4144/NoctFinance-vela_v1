@@ -32,16 +32,24 @@ function requireAddress(name, hints) {
     return v;
 }
 
-// ProcessorEndpoint ABI.
-// ⚠️ UNVERIFIED. This signature was written before the real address was known and has
-//    never been checked against the deployed contract. Now that B1 is resolved
-//    (0xd5E405a84753635608E7a28A59D7349BB2DAaEeF on Base Sepolia), confirm it against
-//    the actual bytecode/ABI before trusting a successful call. Note the sibling script
-//    noct-demo-wasm/demo-tx.js declares a DIFFERENT submitRequest signature -- at most
-//    one of them can be right.
+// ProcessorEndpoint ABI -- VERIFIED 2026-09-28 against the deployed bytecode on Base
+// Sepolia (0xd5E405a84753635608E7a28A59D7349BB2DAaEeF).
+//
+// What was here before was invented and wrong in four separate ways:
+//   * submitRequest took 5 arguments. The real one takes 7, leading with
+//     `uint8 protocolVersion` and trailing with `uint256 maxFeeValue`. inspect-selectors.js
+//     recovered selector 2fbfa0d5 for the 7-argument form from the live bytecode; no
+//     selector for a 5-argument form exists.
+//   * it returned uint256. The real one returns bytes32 -- the requestId.
+//   * it declared `event ProcessRequest(...)`. No such event exists. The real one is
+//     RequestSubmitted(uint64 indexed applicationId, bytes32 indexed requestId,
+//     address indexed sender, address facilitator).
+//   * the payload parameter is `bytes calldata`, not `bytes memory`.
+// Source: IProcessorEndpoint.sol, byte-identical on main and pc/tee_upgrade.
+const PROTOCOL_VERSION = 0; // read live from PROTOCOL_VERSION() -- see check-processor-state.js
 const PROCESSOR_ABI = [
-  "function submitRequest(uint64 applicationId, uint8 requestType, bytes memory encryptedPayload, address tokenAddress, uint256 assetAmount) external payable returns (uint256)",
-  "event ProcessRequest(uint256 indexed requestId, uint64 indexed applicationId, address indexed sender, uint8 requestType)"
+  "function submitRequest(uint8 protocolVersion, uint64 applicationId, uint8 requestType, bytes calldata payload, address tokenAddress, uint256 assetAmount, uint256 maxFeeValue) external payable returns (bytes32)",
+  "event RequestSubmitted(uint64 indexed applicationId, bytes32 indexed requestId, address indexed sender, address facilitator)"
 ];
 
 async function main() {
@@ -168,14 +176,22 @@ async function main() {
   const processor = new ethers.Contract(processorAddress, PROCESSOR_ABI, wallet);
 
   try {
+    // 7 arguments, in the order the live contract expects. maxFeeValue is passed both as a
+    // parameter and inside msg.value: for a native-ETH request the contract requires
+    // msg.value == assetAmount + maxFeeValue (ERC20_DEPOSITS_WITHDRAWALS_DESIGN.md R4).
+    // For an ERC-20 request msg.value must equal maxFeeValue exactly and the asset moves
+    // via transferFrom -- our guest cannot express that yet, see blocker B16.
+    const maxFeeValue = ethers.parseEther('0.001');
     const tx = await processor.submitRequest(
+      PROTOCOL_VERSION,
       appId,
       requestType,
       payloadBytes,
-      ethers.ZeroAddress, // Native token
+      ethers.ZeroAddress, // 0x0 = native ETH (ETH_TOKEN in Structs.sol)
       assetAmount,
+      maxFeeValue,
       {
-        value: assetAmount + ethers.parseEther('0.001') // asset + fee
+        value: assetAmount + maxFeeValue
       }
     );
 
@@ -189,8 +205,8 @@ async function main() {
     for (const log of receipt.logs) {
       try {
         const parsed = processor.interface.parseLog(log);
-        if (parsed.name === 'ProcessRequest') {
-          console.log('🎉 Process Request ID:', parsed.args.requestId.toString());
+        if (parsed.name === 'RequestSubmitted') {
+          console.log('🎉 Request ID:', parsed.args.requestId);
         }
       } catch (e) {
         // Not our event

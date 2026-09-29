@@ -1,15 +1,26 @@
-// Application state is NOT readable from the ProcessorEndpoint contract. Every candidate
-// accessor was tried against the live Base Sepolia contract on 2026-09-28 and reverted with
-// no data: getApplicationState(uint64), getApplicationData(uint64), applications(uint64),
-// getApplication(uint64), getApp(uint64), appStates(uint64), applicationStates(uint64),
-// applications(uint256), getApplicationState(uint256). This script therefore could never
-// have worked as originally written.
+// Application state is readable from the ProcessorEndpoint contract -- but not under the names
+// this script originally guessed. It tried getApplicationState(uint64), getApplicationData(uint64),
+// applications(uint64), getApplication(uint64), getApp(uint64), appStates(uint64),
+// applicationStates(uint64) and applications(uint256); none of those exist, so the conclusion
+// drawn from them ("not readable on-chain") was wrong.
+//
+// CORRECTION 2026-09-28: inspect-selectors.js recovered the real surface from the deployed
+// bytecode. applicationStateRoots(uint64) (selector 7a36a891) DOES exist and returns live state
+// roots -- e.g. vela-nova 11579806367557720661 ->
+// 0xf94034604b7cf0e87d7d480c7bcbaa148b14cf680deafd983305da2abc6647d4. So does appCustody(uint64,
+// address), totalAppCustody(address), pendingClaims(address,address), triggerContracts(uint64),
+// getDeployedAppIds() and PROTOCOL_VERSION(). Use check-processor-state.js for those; this
+// earlier claim is retracted there and in VELA-TESTNET-CONSTANTS.md section 8.2/B9.
+//
+// The subgraph is still the right source for REQUEST HISTORY (who submitted what, when, and how
+// it completed), because the contract only stores the current head of the queue. So both are
+// needed: chain for current state, subgraph for history.
 //
 // Its old hardcoded APP_ID was also FABRICATED: 2397975349340933566 returns 0 records from
-// the subgraph, and only 2 applications have ever been deployed on Base Sepolia. That claim
+// the subgraph, and only 2 applications have ever been deployed on Base Sepolia -- now confirmed
+// by getDeployedAppIds() on the contract itself, not just by the subgraph. That claim
 // was retracted from the root commit -- see VELA-TESTNET-CONSTANTS.md section 8.5.
 //
-// Application state lives in the Goldsky subgraph, so this script queries that instead.
 // Read-only: no key, no transaction, no gas.
 //
 // Usage: node check-app-state.js [applicationId]   (omit the id to list all known apps)

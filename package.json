@@ -1,0 +1,11 @@
+{
+  "name": "noctfinance-local",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "npm --prefix local-app start",
+    "dev": "npm --prefix local-app dev",
+    "test": "npm --prefix local-app test",
+    "validate-vela": "node local-app/validate-vela.mjs"
+  }
+}
